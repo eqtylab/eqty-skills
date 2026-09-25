@@ -3,8 +3,10 @@
 
 from typing import List, Optional
 
-import fire
+import os
 from pathlib import Path
+
+import fire
 from eqty_sdk import Context, Signer, init, set_active_signer
 
 from llama import Llama, Dialog
@@ -34,11 +36,6 @@ def main(
         max_gen_len (int, optional): The maximum length of generated sequences. If None, it will be
             set to the model's max sequence length. Defaults to None.
     """
-    # EQTY lineage: initialise the SDK once per process, before any recording. Its
-    # directory (signer key, stores, manifests) is .eqty/ in the working directory.
-    cfg = init(default_context=Context.new("llama chat completion"), custom_dir=Path(".eqty")).set_store_all_blobs(True)
-    set_active_signer(Signer.load_or_create(name="llama"))
-
     generator = Llama.build(
         ckpt_dir=ckpt_dir,
         tokenizer_path=tokenizer_path,
@@ -106,8 +103,10 @@ If a question does not make any sense, or is not factually coherent, explain why
         )
         print("\n==================================\n")
 
-    cfg.get_default_context().export(Path(".eqty") / "manifests" / "chat_completion.json")
-
 
 if __name__ == "__main__":
+    # EQTY: initialise the SDK and signer once per process; the SDK directory (with the signer key) is gitignored
+    cfg = init(default_context=Context.new("example_chat_completion"), custom_dir=Path(".eqty")).set_store_all_blobs(True)
+    set_active_signer(Signer.load_or_create(name="llama"))
     fire.Fire(main)
+    cfg.get_default_context().export(Path("manifests") / f"example_chat_completion.rank{os.environ.get('RANK', '0')}.json")

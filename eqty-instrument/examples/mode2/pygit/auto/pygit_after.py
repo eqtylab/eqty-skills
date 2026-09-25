@@ -5,11 +5,28 @@ Read the story here: http://benhoyt.com/writings/pygit/
 Released under a permissive MIT license (see LICENSE.txt).
 """
 
-import argparse, collections, difflib, enum, hashlib, operator, os, stat
-import struct, sys, time, urllib.request, zlib
-import inspect
+import argparse, atexit, collections, difflib, enum, hashlib, operator, os
+import stat, struct, sys, time, urllib.request, uuid, zlib
 
-import eqty_sdk
+from eqty_sdk import (Binary, Computation, Context, Custom, Document, Signer,
+                      compute, get_cid_for_bytes, init as eqty_init,
+                      set_active_signer)
+
+
+# EQTY lineage: every run records what it read and wrote, signed, and exports
+# a manifest when the process exits. The SDK directory (with the signer key)
+# lives outside the repo, so nothing new appears in the working copy.
+# PYGIT_EQTY_CONTEXT (a UUID) lets several commands record into one context.
+eqty_dir = os.path.abspath(os.environ.get(
+        'PYGIT_EQTY_DIR', os.path.join(os.path.expanduser('~'), '.pygit-eqty')))
+eqty_context = (Context.from_uuid(uuid.UUID(os.environ['PYGIT_EQTY_CONTEXT']))
+                if 'PYGIT_EQTY_CONTEXT' in os.environ else Context.new('pygit'))
+eqty_config = eqty_init(default_context=eqty_context, custom_dir=eqty_dir)
+eqty_config.set_store_all_blobs(True)
+set_active_signer(Signer.load_or_create(name='pygit'))
+atexit.register(eqty_config.get_default_context().export, os.environ.get(
+        'PYGIT_EQTY_MANIFEST',
+        os.path.join(eqty_dir, 'manifests', str(eqty_context.id) + '.json')))
 
 
 # Data for one entry in the git index (.git/index)
@@ -40,6 +57,11 @@ def write_file(path, data):
         f.write(data)
 
 
+@compute(metadata={
+        'name': 'init',
+        'description': 'Create the repo directory and .git skeleton; HEAD '
+                       'points at refs/heads/master',
+        'computation_type': 'emit'}, _store=True)
 def init(repo):
     """Create directory for repo and initialize .git directory."""
     os.mkdir(repo)
@@ -48,6 +70,7 @@ def init(repo):
         os.mkdir(os.path.join(repo, '.git', name))
     write_file(os.path.join(repo, '.git', 'HEAD'), b'ref: refs/heads/master')
     print('initialized empty repository: {}'.format(repo))
+    return Document.from_path(os.path.join(repo, '.git', 'HEAD'), name='HEAD')
 
 
 def hash_object(data, obj_type, write=True):
@@ -249,31 +272,31 @@ def write_index(entries):
     write_file(os.path.join('.git', 'index'), all_data + digest)
 
 
+@compute(metadata={
+        'name': 'add',
+        'description': 'Add working-tree files to the git index',
+        'computation_type': 'ingest'}, _store=True)
 def add(paths):
     """Add all file paths to git index."""
     paths = [p.replace('\\', '/') for p in paths]
-    lineage = eqty_sdk.Computation.new(
-            name='add', computation_type='transform',
-            description='stage working-copy files: write a blob object for '
-                        'each file and rewrite .git/index',
-            _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(add), name='add', _store=True).cid)
+    eqty_add = Computation.new(
+            name='add: working-tree files -> blob objects + .git/index',
+            description='File bytes as read, blob objects and index as '
+                        'written',
+            computation_type='ingest', _store=True)
+    eqty_read_index = os.path.exists(os.path.join('.git', 'index'))
+    if eqty_read_index:
+        eqty_add.add_input_path(os.path.join('.git', 'index'))
     all_entries = read_index()
-    if os.path.exists(os.path.join('.git', 'index')):
-        # read_index() just read the existing index
-        lineage.add_input_cid(eqty_sdk.Database.from_path(
-                os.path.join('.git', 'index'), name='.git/index',
-                _store=True).cid)
     entries = [e for e in all_entries if e.path not in paths]
     for path in paths:
         data = read_file(path)
-        lineage.add_input_cid(eqty_sdk.Dataset.from_cid(
-                eqty_sdk.get_cid_for_bytes(data, True), name=path).cid)
+        eqty_add.add_input_cid(Document.from_cid(
+                get_cid_for_bytes(data, _store=True), name=path).cid)
         sha1 = hash_object(data, 'blob')
-        object_path = os.path.join('.git', 'objects', sha1[:2], sha1[2:])
-        lineage.add_output_cid(eqty_sdk.Binary.from_path(
-                object_path, name=object_path, _store=True).cid)
+        eqty_add.add_output_cid(Binary.from_path(
+                os.path.join('.git', 'objects', sha1[:2], sha1[2:]),
+                name='blob ' + sha1).cid)
         st = os.stat(path)
         flags = len(path.encode())
         assert flags < (1 << 12)
@@ -284,9 +307,10 @@ def add(paths):
         entries.append(entry)
     entries.sort(key=operator.attrgetter('path'))
     write_index(entries)
-    lineage.add_output_cid(eqty_sdk.Database.from_path(
-            os.path.join('.git', 'index'), name='.git/index', _store=True).cid)
-    lineage.finalize()
+    index = Binary.from_path(os.path.join('.git', 'index'), name='.git/index')
+    if paths or eqty_read_index:  # the SDK rejects a computation with no input
+        eqty_add.add_output_cid(index.cid).finalize()
+    return index
 
 
 def write_tree():
@@ -310,34 +334,32 @@ def get_local_master_hash():
         return None
 
 
+@compute(metadata={
+        'name': 'commit',
+        'description': 'Commit the index to master; returns the commit id',
+        'computation_type': 'transform'}, _store=True)
 def commit(message, author=None):
     """Commit the current state of the index to master with given message.
     Return hash of commit object.
     """
+    eqty_commit = Computation.new(
+            name='commit: .git/index -> tree + commit objects, master ref',
+            description='Index and parent ref as read; tree object, commit '
+                        'object, refs/heads/master and commit id as written',
+            computation_type='transform', _store=True)
+    eqty_read_index = os.path.exists(os.path.join('.git', 'index'))
+    if eqty_read_index:
+        eqty_commit.add_input_path(os.path.join('.git', 'index'))
     tree = write_tree()
-    lineage = eqty_sdk.Computation.new(
-            name='commit', computation_type='emit',
-            description='write the index as a tree object, write a commit '
-                        'object over it, and point master at the commit',
-            _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(commit), name='commit', _store=True).cid)
-    lineage.add_input_cid(eqty_sdk.Document.from_object(
-            message, name='commit message', _store=True).cid)
-    if os.path.exists(os.path.join('.git', 'index')):
-        # write_tree() just read the index that add() wrote
-        lineage.add_input_cid(eqty_sdk.Database.from_path(
-                os.path.join('.git', 'index'), name='.git/index',
-                _store=True).cid)
-    tree_path = os.path.join('.git', 'objects', tree[:2], tree[2:])
-    lineage.add_output_cid(eqty_sdk.Binary.from_path(
-            tree_path, name=tree_path, _store=True).cid)
+    eqty_commit.add_output_cid(Binary.from_path(
+            os.path.join('.git', 'objects', tree[:2], tree[2:]),
+            name='tree ' + tree).cid)
+    eqty_read_parent = os.path.exists(
+            os.path.join('.git', 'refs', 'heads', 'master'))
+    if eqty_read_parent:
+        eqty_commit.add_input_path(
+                os.path.join('.git', 'refs', 'heads', 'master'))
     parent = get_local_master_hash()
-    if parent is not None:
-        # get_local_master_hash() just read the ref this commit will move
-        lineage.add_input_cid(eqty_sdk.Document.from_path(
-                os.path.join('.git', 'refs', 'heads', 'master'),
-                name='.git/refs/heads/master', _store=True).cid)
     if author is None:
         author = '{} <{}>'.format(
                 os.environ['GIT_AUTHOR_NAME'], os.environ['GIT_AUTHOR_EMAIL'])
@@ -358,14 +380,16 @@ def commit(message, author=None):
     lines.append('')
     data = '\n'.join(lines).encode()
     sha1 = hash_object(data, 'commit')
+    eqty_commit.add_output_cid(Binary.from_path(
+            os.path.join('.git', 'objects', sha1[:2], sha1[2:]),
+            name='commit ' + sha1).cid)
     master_path = os.path.join('.git', 'refs', 'heads', 'master')
     write_file(master_path, (sha1 + '\n').encode())
-    commit_path = os.path.join('.git', 'objects', sha1[:2], sha1[2:])
-    lineage.add_output_cid(eqty_sdk.Binary.from_path(
-            commit_path, name=commit_path, _store=True).cid)
-    lineage.add_output_cid(eqty_sdk.Document.from_path(
-            master_path, name='.git/refs/heads/master', _store=True).cid)
-    lineage.finalize()
+    eqty_commit.add_output_cid(Document.from_path(
+            master_path, name='refs/heads/master').cid)
+    eqty_commit.add_output_object(sha1)
+    if eqty_read_index or eqty_read_parent:  # the SDK rejects no-input steps
+        eqty_commit.finalize()
     print('committed to master: {:7}'.format(sha1))
     return sha1
 
@@ -416,28 +440,25 @@ def get_remote_master_hash(git_url, username, password):
     """
     url = git_url + '/info/refs?service=git-receive-pack'
     response = http_request(url, username, password)
-    lineage = eqty_sdk.Computation.new(
-            name='get_remote_master_hash', computation_type='ingest',
-            description="fetch the remote's ref advertisement to learn "
-                        'which commit its master points at',
-            _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(get_remote_master_hash),
-            name='get_remote_master_hash', _store=True).cid)
-    lineage.add_input_cid(eqty_sdk.Configuration.from_object(
-            git_url, name='remote URL', _store=True).cid)
-    lineage.add_output_cid(eqty_sdk.Document.from_cid(
-            eqty_sdk.get_cid_for_bytes(response, True),
-            name='info/refs advertisement').cid)
-    lineage.finalize()
+    eqty_fetch = (Computation.new(
+                name='get_remote_master_hash: GET info/refs',
+                description='Remote ref advertisement as received; the '
+                            'remote master id when the remote has one',
+                computation_type='ingest', _store=True)
+            .add_input_cid(Custom.from_object(url, name='info/refs URL').cid)
+            .add_output_cid(Document.from_cid(
+                    get_cid_for_bytes(response, _store=True),
+                    name='remote ref advertisement').cid))
     lines = extract_lines(response)
     assert lines[0] == b'# service=git-receive-pack\n'
     assert lines[1] == b''
     if lines[2][:40] == b'0' * 40:
+        eqty_fetch.finalize()
         return None
     master_sha1, master_ref = lines[2].split(b'\x00')[0].split()
     assert master_ref == b'refs/heads/master'
     assert len(master_sha1) == 40
+    eqty_fetch.add_output_object(master_sha1.decode()).finalize()
     return master_sha1.decode()
 
 
@@ -498,32 +519,9 @@ def find_missing_objects(local_sha1, remote_sha1):
     at the remote (based on the given remote commit hash).
     """
     local_objects = find_commit_objects(local_sha1)
-    lineage = eqty_sdk.Computation.new(
-            name='find_missing_objects', computation_type='decide',
-            description='walk the local commit and choose the objects the '
-                        'remote does not have',
-            _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(find_missing_objects),
-            name='find_missing_objects', _store=True).cid)
-    # find_commit_objects() starts its walk by reading this commit object
-    local_path = find_object(local_sha1)
-    lineage.add_input_cid(eqty_sdk.Binary.from_path(
-            local_path, name=local_path, _store=True).cid)
     if remote_sha1 is None:
-        lineage.add_output_cid(eqty_sdk.Document.from_object(
-                sorted(local_objects), name='missing objects',
-                _store=True).cid)
-        lineage.finalize()
         return local_objects
     remote_objects = find_commit_objects(remote_sha1)
-    remote_path = find_object(remote_sha1)
-    lineage.add_input_cid(eqty_sdk.Binary.from_path(
-            remote_path, name=remote_path, _store=True).cid)
-    lineage.add_output_cid(eqty_sdk.Document.from_object(
-            sorted(local_objects - remote_objects), name='missing objects',
-            _store=True).cid)
-    lineage.finalize()
     return local_objects - remote_objects
 
 
@@ -554,23 +552,17 @@ def create_pack(objects):
     contents = header + body
     sha1 = hashlib.sha1(contents).digest()
     data = contents + sha1
-    lineage = eqty_sdk.Computation.new(
-            name='create_pack', computation_type='aggregate',
-            description='pack the chosen objects into one packfile',
-            object_count=len(objects), _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(create_pack), name='create_pack',
-            _store=True).cid)
-    lineage.add_input_cid(eqty_sdk.Document.from_object(
-            sorted(objects), name='missing objects', _store=True).cid)
-    for obj in sorted(objects):
-        # encode_pack_object() read this object file into the pack
-        object_path = find_object(obj)
-        lineage.add_input_cid(eqty_sdk.Binary.from_path(
-                object_path, name=object_path, _store=True).cid)
-    lineage.add_output_cid(eqty_sdk.Binary.from_cid(
-            eqty_sdk.get_cid_for_bytes(data, True), name='packfile').cid)
-    lineage.finalize()
+    if objects:  # the SDK rejects a computation with no inputs
+        (Computation.new(
+                name='create_pack: objects -> packfile',
+                description='Object files packed (as stored); PACK v2 bytes '
+                            'produced',
+                computation_type='aggregate', _store=True)
+            .add_input_path([os.path.join('.git', 'objects', o[:2], o[2:])
+                             for o in sorted(objects)])
+            .add_output_cid(Binary.from_cid(
+                    get_cid_for_bytes(data, _store=True), name='packfile').cid)
+            .finalize())
     return data
 
 
@@ -581,6 +573,16 @@ def push(git_url, username=None, password=None):
     if password is None:
         password = os.environ['GIT_PASSWORD']
     remote_sha1 = get_remote_master_hash(git_url, username, password)
+    eqty_push = Computation.new(
+            name='push: pack -> remote git-receive-pack',
+            description='Local master ref as read, remote master id, pack '
+                        'sent; the remote status report received',
+            computation_type='emit', _store=True)
+    if remote_sha1 is not None:
+        eqty_push.add_input_object(remote_sha1)
+    if os.path.exists(os.path.join('.git', 'refs', 'heads', 'master')):
+        eqty_push.add_input_path(
+                os.path.join('.git', 'refs', 'heads', 'master'))
     local_sha1 = get_local_master_hash()
     missing = find_missing_objects(local_sha1, remote_sha1)
     print('updating remote master from {} to {} ({} object{})'.format(
@@ -588,29 +590,14 @@ def push(git_url, username=None, password=None):
             '' if len(missing) == 1 else 's'))
     lines = ['{} {} refs/heads/master\x00 report-status'.format(
             remote_sha1 or ('0' * 40), local_sha1).encode()]
-    ref_update = build_lines_data(lines)
     pack = create_pack(missing)
-    data = ref_update + pack
+    eqty_push.add_input_cid(get_cid_for_bytes(pack))
+    data = build_lines_data(lines) + pack
     url = git_url + '/git-receive-pack'
     response = http_request(url, username, password, data=data)
-    lineage = eqty_sdk.Computation.new(
-            name='push', computation_type='emit',
-            description='POST the ref update and the packfile to the '
-                        "remote's git-receive-pack",
-            _store=True)
-    lineage.add_input_cid(eqty_sdk.Code.from_object(
-            inspect.getsource(push), name='push', _store=True).cid)
-    lineage.add_input_cid(eqty_sdk.Configuration.from_object(
-            git_url, name='remote URL', _store=True).cid)
-    lineage.add_input_cid(eqty_sdk.Document.from_cid(
-            eqty_sdk.get_cid_for_bytes(ref_update, True),
-            name='ref update').cid)
-    lineage.add_input_cid(eqty_sdk.Binary.from_cid(
-            eqty_sdk.get_cid_for_bytes(pack, True), name='packfile').cid)
-    lineage.add_output_cid(eqty_sdk.Document.from_cid(
-            eqty_sdk.get_cid_for_bytes(response, True),
-            name='receive-pack response').cid)
-    lineage.finalize()
+    eqty_push.add_output_cid(Document.from_cid(
+            get_cid_for_bytes(response, _store=True),
+            name='remote status report').cid).finalize()
     lines = extract_lines(response)
     assert len(lines) >= 2, \
         'expected at least 2 lines, got {}'.format(len(lines))
@@ -690,14 +677,6 @@ if __name__ == '__main__':
             help='show status of working copy')
 
     args = parser.parse_args()
-    if args.command in ['add', 'commit', 'push']:
-        # These commands run recorded steps. The SDK directory, and the
-        # signing key in it, live inside .git, outside the tracked files.
-        eqty_config = eqty_sdk.init(
-                default_context=eqty_sdk.Context.new('pygit ' + args.command),
-                custom_dir=os.path.join('.git', 'eqty_sdk'))
-        eqty_config.set_store_all_blobs(True)
-        eqty_sdk.set_active_signer(eqty_sdk.Signer.load_or_create(name='pygit'))
     if args.command == 'add':
         add(args.paths)
     elif args.command == 'cat-file':

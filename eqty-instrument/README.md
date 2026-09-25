@@ -39,7 +39,7 @@ Mode 2 candidate, not a failure.
 | `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
 | `isolated_cfg.py` | Mode 2 step 1: runs the CFG agents as fresh, isolated processes and checks nothing leaked |
 | `examples/mode1/` | four real Mode 1 runs on stripped `eqty-lineage` examples — before, after, diff |
-| `examples/mode2/` | pygit and llama, auto and HITL — before, after, diff, manifest |
+| `examples/mode2/` | pygit and llama, auto and HITL — before, after, diff, manifest, node selection, placement and review doc |
 
 The regression suite, its fixtures, the instrumented fixtures and the manifest they
 emitted live outside the skill, in the repo's `tests/eqty-instrument/`. Inside the

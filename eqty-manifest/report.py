@@ -510,6 +510,7 @@ PROBLEM_REASONS = {
     "cid_mismatch": ("bad", "hash mismatch — content altered"),
     "invalid_base64": ("warn", "broken encoding — cannot be hashed"),
     "missing_blob": ("warn", "missing — referenced, not embedded"),
+    "by_reference": ("unk", "by reference — declared, not embedded"),
     "content_verification_unavailable": ("unk", "not checked"),
 }
 
@@ -524,6 +525,7 @@ def _content_row(c):
     content present but unreadable, so it cannot be hashed at all."""
     st = c.get("status")
     mismatched, missing = len(c.get("mismatched") or []), len(c.get("missing") or [])
+    by_ref = len(c.get("by_reference") or {})
     bad_b64 = len(c.get("invalid_base64") or [])
     unverifiable = c.get("unverifiable", 0)
     if st == "verified":
@@ -538,11 +540,15 @@ def _content_row(c):
         if unverifiable - bad_b64:
             notes.append("%d with an undecodable CID (not checked)" % (unverifiable - bad_b64))
         cls = "bad" if mismatched else "warn" if notes else "ok"
+        if by_ref:  # declared by the signer: listed, but not a warning on its own
+            notes.append("%d by reference (declared, not embedded)" % by_ref)
         text = "%d/%d blobs match their CID" % (c["matched"], total)
         return cls, text + (" — " + ", ".join(notes) if notes else "")
     text = "not checked — %s" % (c.get("detail") or st)
     if missing:
         text += "; %d referenced but missing" % missing
+    if by_ref:
+        text += "; %d by reference" % by_ref
     return "unk", text
 
 
@@ -620,11 +626,14 @@ def _hashes_pill(c):
     """Block (4)'s numbers: verified out of the hashes that have a pre-image."""
     if c.get("status") != "verified":
         return _content_row(c)
-    attached = c["total"] - len(c["missing"])
+    by_ref = len(c.get("by_reference") or {})
+    attached = c["total"] - len(c["missing"]) - by_ref
     notes = [x for x in [c["mismatched"] and "%d tampered" % len(c["mismatched"]),
                          c.get("invalid_base64") and "%d invalid base64" % len(c["invalid_base64"]),
                          c["missing"] and "%d missing pre-image" % len(c["missing"])] if x]
     cls = "bad" if c["mismatched"] or c.get("invalid_base64") else "warn" if notes else "ok"
+    if by_ref:
+        notes.append("%d by reference" % by_ref)
     return cls, "%d/%d verified%s" % (c["matched"], attached, " — " + ", ".join(notes) if notes else "")
 
 
@@ -644,6 +653,7 @@ def _hash_bar(c):
     bad64 = len(c.get("invalid_base64") or [])
     parts = [("ok", "verified", c["matched"]), ("bad", "tampered", len(c["mismatched"])),
              ("bad", "invalid base64", bad64), ("warn", "missing pre-image", len(c["missing"])),
+             ("unk", "by reference", len(c.get("by_reference") or {})),
              ("unk", "not checked", c["unverifiable"] - bad64)]
     parts = [p for p in parts if p[2]]
     total = c["total"] or 1
@@ -717,7 +727,7 @@ def _verification_html(v):
     if c.get("status") != "verified":
         a("<p>%s</p>" % _pill("unk", "not checked — %s" % c.get("detail")))
     else:
-        attached = c["total"] - len(c["missing"])
+        attached = c["total"] - len(c["missing"]) - len(c.get("by_reference") or {})
         a("<p>%d hashes · %d have pre-images attached · <strong>%d / %d verified</strong></p>"
           % (c["total"], attached, c["matched"], attached))
         a(_hash_bar(c))
@@ -728,6 +738,13 @@ def _verification_html(v):
             if xs:
                 a('<p class="issue"><strong>%s</strong> · %d</p>' % (E(title), len(xs)))
                 a(_ids_html(urn(xs)))
+        br = c.get("by_reference") or {}
+        if br:
+            a('<p class="issue"><strong>By reference</strong> · %d — %s</p>' % (len(br), E(SM.BY_REFERENCE_NOTE)))
+            a(_ids_html(["urn:cid:%s — %s%s%s" % (k, d.get("name") or "unnamed",
+                                                 " (%s)" % d["reason"] if d.get("reason") else "",
+                                                 "; obtain from: %s" % d["obtain_from"] if d.get("obtain_from") else "")
+                         for k, d in sorted(br.items())]))
 
     # (5) execution environment
     hw, links = v["hardware"], v["executed_on"]

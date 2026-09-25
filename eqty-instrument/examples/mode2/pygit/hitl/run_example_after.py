@@ -1,148 +1,108 @@
-#!/usr/bin/env python3
-"""Run the instrumented pygit against a stub git server and export a manifest.
+"""Scaffolding for the pygit HITL run. Not part of pygit, and carries no nodes.
 
-Scaffolding, not part of pygit: this file is not in the pristine target, so it
-carries no lineage nodes of its own. It initialises the SDK, drives pygit's own
-entry points in the command sequence the CFG was pinned to --
+Runs L1's command sequence through pygit's own command line:
+    init myrepo -> (cd myrepo) add FILE... -> commit -m MSG -> push GIT_URL
 
-    init -> add -> commit -> push
-
--- and exports the context pygit's own code filled in. Every node in the
-manifest comes from the two `Computation` builders inside pygit.py: one in
-`create_pack` (the pack), one in `push` (the POST).
-
-It calls pygit exactly as pygit's own CLI does: plain strings and lists in,
-`push(git_url, username=..., password=...)` with the credentials passed by
-keyword. The builders never record the credentials either way.
-
-pygit's own command line initialises the SDK itself (in its `push` branch,
-into `.git/eqty_sdk`). Imported as a library, as here, it is the caller's job,
-so this script does it before calling `push`.
-
-WHAT IS STUBBED
----------------
-The remote. `_ReceivePackHandler` below is ~40 lines of the smart-HTTP
-receive-pack protocol: it answers `info/refs` with an empty repository and
-answers the POST with `unpack ok` / `ok refs/heads/master`. Nothing else is
-faked -- the objects, the index, the commit, the pack and the pkt-line framing
-are all produced by pygit.
-
-**The manifest is therefore not a claim that a real git server accepted this
-push.** It records which loose object files the pack read, the pack bytes, the
-ref-update commands and pack the POST body carried, and the reply the stub
-sent back.
-
-    python3 run_example.py [--manifest PATH] [--store DIR] [--keep]
+The remote is stubbed: instead of GitHub, a local HTTP server on 127.0.0.1
+hands each request to the real `git http-backend` CGI over a bare repo in
+./example/remote.git. The push leg initialises the SDK in pygit's own
+`__main__` (SDK directory: example/myrepo/.git/eqty_sdk) and exports its
+manifest there; this script then moves that one file to ../pygit.hitl.manifest.json.
 """
 
-from __future__ import annotations
+import http.server, os, shutil, subprocess, sys, threading
 
-import argparse
-import http.server
-import os
-import shutil
-import sys
-import tempfile
-import threading
-from pathlib import Path
-
-import eqty_sdk as sdk
-
-HERE = Path(__file__).resolve().parent
-DEFAULT_MANIFEST = HERE.parents[1] / "outputs" / "pygit" / "pygit.hitl.manifest.json"
-
-ZERO = b"0" * 40
+HERE = os.path.dirname(os.path.abspath(__file__))
+PYGIT = os.path.join(HERE, 'pygit.py')
+WORK = os.path.join(HERE, 'example')
+REMOTE = os.path.join(WORK, 'remote.git')
+REPO = os.path.join(WORK, 'myrepo')
+MANIFEST_OUT = os.path.join(os.path.dirname(HERE), 'pygit.hitl.manifest.json')
+GIT_BACKEND = os.path.join(subprocess.check_output(
+        ['git', '--exec-path'], text=True).strip(), 'git-http-backend')
 
 
-def pkt(payload: bytes) -> bytes:
-    """One pkt-line: a 4-hex-digit length prefix covering itself."""
-    return ("%04x" % (len(payload) + 4)).encode() + payload
+class GitBackend(http.server.BaseHTTPRequestHandler):
+    """Local stand-in for the GitHub endpoint: a CGI bridge to git http-backend."""
 
-
-FLUSH = b"0000"
-
-INFO_REFS = (
-    pkt(b"# service=git-receive-pack\n")
-    + FLUSH
-    + pkt(ZERO + b" capabilities^{}\x00report-status\n")
-    + FLUSH
-)
-RECEIVE_PACK_OK = pkt(b"unpack ok\n") + pkt(b"ok refs/heads/master\n") + FLUSH
-
-
-class _ReceivePackHandler(http.server.BaseHTTPRequestHandler):
-    """The stubbed boundary: just enough git smart-HTTP to complete a push."""
-
-    posted: list[bytes] = []
-
-    def _send(self, body: bytes, content_type: str) -> None:
-        self.send_response(200)
-        self.send_header("Content-Type", content_type)
-        self.send_header("Content-Length", str(len(body)))
+    def _cgi(self, method):
+        path, _, query = self.path.partition('?')
+        body = self.rfile.read(int(self.headers.get('Content-Length') or 0))
+        service = path.rsplit('/', 1)[-1]
+        env = {
+            'PATH': os.environ['PATH'],
+            'GIT_PROJECT_ROOT': WORK,
+            'GIT_HTTP_EXPORT_ALL': '1',
+            'REQUEST_METHOD': method,
+            'PATH_INFO': path,
+            'QUERY_STRING': query,
+            'CONTENT_LENGTH': str(len(body)),
+            # pygit sends urllib's default form content type; http-backend
+            # insists on the git one. The stand-in supplies it.
+            'CONTENT_TYPE': 'application/x-{}-request'.format(service)
+                            if method == 'POST' else '',
+            'REMOTE_USER': self.headers.get('Authorization') and 'pygit' or '',
+            'REMOTE_ADDR': '127.0.0.1',
+        }
+        out = subprocess.run([GIT_BACKEND], input=body, env=env,
+                             capture_output=True, check=True).stdout
+        head, _, payload = out.partition(b'\r\n\r\n')
+        status, headers = 200, []
+        for line in head.decode().split('\r\n'):
+            key, _, value = line.partition(': ')
+            if key.lower() == 'status':
+                status = int(value.split()[0])
+            else:
+                headers.append((key, value))
+        self.send_response(status)
+        for key, value in headers:
+            self.send_header(key, value)
+        self.send_header('Content-Length', str(len(payload)))
         self.end_headers()
-        self.wfile.write(body)
+        self.wfile.write(payload)
 
-    def do_GET(self):  # noqa: N802 - http.server's spelling
-        if "service=git-receive-pack" not in self.path:
-            self.send_error(404)
-            return
-        self._send(INFO_REFS, "application/x-git-receive-pack-advertisement")
+    def do_GET(self):
+        self._cgi('GET')
 
-    def do_POST(self):  # noqa: N802
-        length = int(self.headers.get("Content-Length", 0))
-        _ReceivePackHandler.posted.append(self.rfile.read(length))
-        self._send(RECEIVE_PACK_OK, "application/x-git-receive-pack-result")
+    def do_POST(self):
+        self._cgi('POST')
 
-    def log_message(self, *args):
-        pass
+    def log_message(self, fmt, *args):
+        print('  remote:', fmt % args)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
-    parser.add_argument("--store", type=Path, default=HERE / ".eqty_sdk")
-    parser.add_argument("--keep", action="store_true",
-                        help="leave the scratch repository on disk")
-    args = parser.parse_args()
+def pygit(*args, cwd):
+    print('$ pygit.py', ' '.join(args))
+    subprocess.run([sys.executable, PYGIT, *args], cwd=cwd, env=ENV, check=True)
 
-    sys.path.insert(0, str(HERE))
-    import pygit
 
-    # One identity, one context, for this process. store_all_blobs keeps every
-    # preimage in the manifest, so a reader can open what was committed to.
-    config = sdk.init(default_context=sdk.Context.new("pygit push"),
-                      custom_dir=str(args.store))
-    config.set_store_all_blobs(True)
-    sdk.set_active_signer(sdk.Signer.load_or_create(name="pygit_hitl"))
+if __name__ == '__main__':
+    shutil.rmtree(WORK, ignore_errors=True)
+    os.makedirs(WORK)
+    subprocess.run(['git', 'init', '-q', '--bare', '-b', 'master', REMOTE], check=True)
+    subprocess.run(['git', '-C', REMOTE, 'config', 'http.receivepack', 'true'], check=True)
 
-    server = http.server.HTTPServer(("127.0.0.1", 0), _ReceivePackHandler)
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), GitBackend)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    git_url = "http://127.0.0.1:{}/example.git".format(server.server_address[1])
+    git_url = 'http://127.0.0.1:{}/remote.git'.format(server.server_port)
 
-    workdir = Path(tempfile.mkdtemp(prefix="pygit-hitl-"))
-    cwd = Path.cwd()
-    try:
-        os.chdir(workdir)
-        pygit.init("repo")
-        os.chdir(workdir / "repo")
+    ENV = dict(os.environ, GIT_AUTHOR_NAME='Example Author',
+               GIT_AUTHOR_EMAIL='author@example.com',
+               GIT_USERNAME='example-user', GIT_PASSWORD='example-password')
 
-        pygit.write_file("README.md", b"# example\n\nA repository with two files.\n")
-        pygit.write_file("hello.txt", b"hello from pygit\n")
-        pygit.add(["README.md", "hello.txt"])
-        pygit.commit("first commit", author="Example <example@example.com>")
+    pygit('init', 'myrepo', cwd=WORK)
+    with open(os.path.join(REPO, 'hello.txt'), 'w') as f:
+        f.write('hello, pygit\n')
+    with open(os.path.join(REPO, 'notes.md'), 'w') as f:
+        f.write('# notes\n\npushed by pygit to a local git http-backend\n')
+    pygit('add', 'hello.txt', 'notes.md', cwd=REPO)
+    pygit('commit', '-m', 'first commit from pygit', cwd=REPO)
+    pygit('push', git_url, cwd=REPO)
+    server.shutdown()
 
-        pygit.push(git_url, username="example", password="not-a-real-token")
-    finally:
-        os.chdir(cwd)
-        server.shutdown()
-        if not args.keep:
-            shutil.rmtree(workdir, ignore_errors=True)
+    # The remote is real git: confirm it accepted what pygit pushed.
+    subprocess.run(['git', '-C', REMOTE, 'fsck', '--strict'], check=True)
+    subprocess.run(['git', '-C', REMOTE, 'log', '--stat', 'master'], check=True)
 
-    args.manifest.parent.mkdir(parents=True, exist_ok=True)
-    config.get_default_context().export(args.manifest)
-    print("wrote {}".format(args.manifest))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    shutil.move(os.path.join(REPO, '.git', 'eqty_sdk', 'manifest.json'), MANIFEST_OUT)
+    print('manifest:', MANIFEST_OUT)

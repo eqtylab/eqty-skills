@@ -5,10 +5,8 @@ Read the story here: http://benhoyt.com/writings/pygit/
 Released under a permissive MIT license (see LICENSE.txt).
 """
 
-import argparse, collections, difflib, enum, hashlib, operator, os, stat
-import struct, sys, time, urllib.request, zlib
-
-import inspect
+import argparse, collections, difflib, enum, hashlib, inspect, operator, os
+import stat, struct, sys, time, urllib.request, zlib
 
 import eqty_sdk
 
@@ -464,25 +462,25 @@ def create_pack(objects):
     """Create pack file containing all objects in given given set of SHA-1
     hashes, return data bytes of full pack file.
     """
-    header = struct.pack('!4sLL', b'PACK', 2, len(objects))
-    body = b''.join(encode_pack_object(o) for o in sorted(objects))
-    contents = header + body
-    sha1 = hashlib.sha1(contents).digest()
-    data = contents + sha1
     pack = eqty_sdk.Computation.new(
-            name='create_pack', computation_type='aggregate',
-            description='pack the objects the remote is missing into one '
-                        'pack file', _store=True)
+            name='Pack missing objects',
+            description='create_pack(): PACK v2 file of the given objects',
+            computation_type='aggregate', object_count=len(objects),
+            _store=True)
     pack.add_input_cid(eqty_sdk.Code.from_object(
             inspect.getsource(create_pack), name='create_pack',
             _store=True).cid)
     for o in sorted(objects):
         pack.add_input_cid(eqty_sdk.Binary.from_path(
-                find_object(o), name='git object ' + o, git_object_id=o,
-                _store=True).cid)
+                find_object(o), name='Loose object ' + o, _store=True).cid)
+    header = struct.pack('!4sLL', b'PACK', 2, len(objects))
+    body = b''.join(encode_pack_object(o) for o in sorted(objects))
+    contents = header + body
+    sha1 = hashlib.sha1(contents).digest()
+    data = contents + sha1
     pack.add_output_cid(eqty_sdk.Binary.from_cid(
             eqty_sdk.get_cid_for_bytes(data, _store=True),
-            name='packfile').cid)
+            name='Packfile').cid)
     pack.finalize()
     return data
 
@@ -501,26 +499,28 @@ def push(git_url, username=None, password=None):
             '' if len(missing) == 1 else 's'))
     lines = ['{} {} refs/heads/master\x00 report-status'.format(
             remote_sha1 or ('0' * 40), local_sha1).encode()]
-    commands = build_lines_data(lines)
-    data = commands + create_pack(missing)
+    command = build_lines_data(lines)
+    pack = create_pack(missing)
+    data = command + pack
     url = git_url + '/git-receive-pack'
+    post = eqty_sdk.Computation.new(
+            name='POST pack to git-receive-pack',
+            description='push(): send ref update + packfile, read report-status',
+            computation_type='emit', url=url,
+            old=remote_sha1 or ('0' * 40), new=local_sha1, _store=True)
+    post.add_input_cid(eqty_sdk.Code.from_object(
+            inspect.getsource(push), name='push', _store=True).cid)
+    post.add_input_cid(eqty_sdk.Document.from_cid(
+            eqty_sdk.get_cid_for_bytes(command, _store=True),
+            name='receive-pack ref-update command').cid)
+    post.add_input_cid(eqty_sdk.Binary.from_cid(
+            eqty_sdk.get_cid_for_bytes(pack, _store=True),
+            name='Packfile').cid)
     response = http_request(url, username, password, data=data)
-    eqty_sdk.Computation.new(
-            name='POST pack to git-receive-pack', computation_type='emit',
-            description='send the ref update and the pack to the remote, '
-                        'and receive its report', url=url, _store=True) \
-        .add_input_cid(eqty_sdk.Code.from_object(
-                inspect.getsource(push), name='push', _store=True).cid) \
-        .add_input_cid(eqty_sdk.Document.from_cid(
-                eqty_sdk.get_cid_for_bytes(data[:len(commands)], _store=True),
-                name='receive-pack commands').cid) \
-        .add_input_cid(eqty_sdk.Binary.from_cid(
-                eqty_sdk.get_cid_for_bytes(data[len(commands):], _store=True),
-                name='packfile').cid) \
-        .add_output_cid(eqty_sdk.Document.from_cid(
-                eqty_sdk.get_cid_for_bytes(response, _store=True),
-                name='receive-pack response').cid) \
-        .finalize()
+    post.add_output_cid(eqty_sdk.Document.from_cid(
+            eqty_sdk.get_cid_for_bytes(response, _store=True),
+            name='receive-pack report-status').cid)
+    post.finalize()
     lines = extract_lines(response)
     assert len(lines) >= 2, \
         'expected at least 2 lines, got {}'.format(len(lines))
@@ -620,10 +620,17 @@ if __name__ == '__main__':
     elif args.command == 'ls-files':
         ls_files(details=args.stage)
     elif args.command == 'push':
-        eqty_sdk.init(default_context=eqty_sdk.Context.new('pygit push'),
-                      custom_dir=os.path.join('.git', 'eqty_sdk'))
-        eqty_sdk.set_active_signer(eqty_sdk.Signer.load_or_create(name='pygit'))
-        push(args.git_url, username=args.username, password=args.password)
+        eqty_dir = os.path.join('.git', 'eqty_sdk')
+        eqty_cfg = eqty_sdk.init(default_context=eqty_sdk.Context.new(
+                'pygit push'), custom_dir=eqty_dir)
+        eqty_sdk.set_active_signer(eqty_sdk.Signer.load_or_create(
+                name='pygit'))
+        try:
+            push(args.git_url, username=args.username,
+                 password=args.password)
+        finally:
+            eqty_cfg.get_default_context().export(
+                    os.path.join(eqty_dir, 'manifest.json'))
     elif args.command == 'status':
         status()
     else:

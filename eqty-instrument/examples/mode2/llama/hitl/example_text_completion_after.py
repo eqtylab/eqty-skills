@@ -1,8 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates.
 # This software may be used and distributed according to the terms of the Llama 2 Community License Agreement.
 
-import fire
+import os
 from pathlib import Path
+
+import fire
 from eqty_sdk import Context, Signer, init, set_active_signer
 
 from llama import Llama
@@ -31,11 +33,6 @@ def main(
         max_gen_len (int, optional): The maximum length of generated sequences. Defaults to 64.
         max_batch_size (int, optional): The maximum batch size for generating sequences. Defaults to 4.
     """ 
-    # EQTY lineage: initialise the SDK once per process, before any recording. Its
-    # directory (signer key, stores, manifests) is .eqty/ in the working directory.
-    cfg = init(default_context=Context.new("llama text completion"), custom_dir=Path(".eqty")).set_store_all_blobs(True)
-    set_active_signer(Signer.load_or_create(name="llama"))
-
     generator = Llama.build(
         ckpt_dir=ckpt_dir,
         tokenizer_path=tokenizer_path,
@@ -71,8 +68,10 @@ def main(
         print(f"> {result['generation']}")
         print("\n==================================\n")
 
-    cfg.get_default_context().export(Path(".eqty") / "manifests" / "text_completion.json")
-
 
 if __name__ == "__main__":
+    # EQTY: initialise the SDK and signer once per process; the SDK directory (with the signer key) is gitignored
+    cfg = init(default_context=Context.new("example_text_completion"), custom_dir=Path(".eqty")).set_store_all_blobs(True)
+    set_active_signer(Signer.load_or_create(name="llama"))
     fire.Fire(main)
+    cfg.get_default_context().export(Path("manifests") / f"example_text_completion.rank{os.environ.get('RANK', '0')}.json")

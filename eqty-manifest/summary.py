@@ -24,7 +24,10 @@ Blocks, in order:
 
 Exit code: 0 everything verified, 1 anything failed or was tampered with,
 2 nothing failed but something could not be checked or is missing (including
-when a dependency is missing, so nothing could be checked at all).
+when a dependency is missing, so nothing could be checked at all). A hash the
+signer declared as committed by reference (storage="by-reference" on its
+signed, intact metadata) is not "missing": it is listed under Hashes with its
+reason and does not by itself make the exit code 2.
 
 Composes the existing checks; it re-implements none of them:
 verify_credentials (eqty_sdk verify_vc / verify_statement), parse_manifest's
@@ -336,6 +339,28 @@ def _state(v):
     return {True: "verified", False: "FAILED", None: "not checked"}[v]
 
 
+BY_REFERENCE_NOTE = ("declared by the signer as committed by CID only; "
+                     "the bytes are not embedded, so they cannot be checked without the original file")
+
+
+def _by_reference_lines(c, full):
+    """Assets the emitter deliberately left out. Not missing, and not verified:
+    one count line, the note, then each asset by name with its stated reason."""
+    br = c.get("by_reference") or {}
+    if not br:
+        return []
+    out = ["- %d hash%s by reference, %s" % (len(br), " is" if len(br) == 1 else "es are", BY_REFERENCE_NOTE)]
+    items = []
+    for cid, d in sorted(br.items()):
+        item = "%s — %s" % (_urn(cid), d.get("name") or "unnamed")
+        if d.get("reason"):
+            item += " (%s)" % d["reason"]
+        if d.get("obtain_from"):
+            item += "; obtain from: %s" % d["obtain_from"]
+        items.append(item)
+    return out + _cap(items, full, "  - ")
+
+
 def render_text(s, full=False):
     L = ["Summary", "======="]
     for name, t in s["rows"]:
@@ -370,8 +395,9 @@ def render_text(s, full=False):
         L.append("- not checked — %s" % c.get("detail"))
         if c.get("missing"):
             L.append("- %d hash%s missing pre-image blobs" % (len(c["missing"]), " has" if len(c["missing"]) == 1 else "es have"))
+        L += _by_reference_lines(c, full)
     else:
-        attached = c["total"] - len(c["missing"])
+        attached = c["total"] - len(c["missing"]) - len(c.get("by_reference") or {})
         bad64 = c.get("invalid_base64") or []
         other = c["unverifiable"] - len(bad64)
         L += ["- Total of %d hashes" % c["total"],
@@ -387,6 +413,7 @@ def render_text(s, full=False):
             L += _cap([_urn(x) for x in bad64], full, "  - ")
         if other:
             L.append("- %d not checked (CID is not BLAKE3)" % other)
+        L += _by_reference_lines(c, full)
         if c["missing"]:
             L.append("- %d hash%s missing pre-image blobs" % (len(c["missing"]), " has" if len(c["missing"]) == 1 else "es have"))
             L += _cap([_urn(x) for x in c["missing"]], full, "  - ")

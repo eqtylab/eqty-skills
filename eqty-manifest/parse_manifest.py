@@ -455,6 +455,31 @@ class Manifest:
                 out[subject] = self.content(meta_cid)
         return out
 
+    # The emitter's declaration that an asset is committed by CID only, its
+    # bytes deliberately left out (weights, a large dataset). Written by
+    # eqty-instrument as metadata on the asset itself: storage="by-reference",
+    # plus storage_reason and, optionally, obtain_from.
+    BY_REFERENCE = "by-reference"
+
+    def by_reference_declaration(self, key: str):
+        """The declaration for a CID that is referenced but not embedded, or
+        None. It is the signer's claim, not a check: the asset's bytes still
+        cannot be verified from this manifest. It only counts when the
+        metadata blob carrying it is itself embedded and hashes to its CID, so
+        an altered or absent declaration falls back to plain `missing`."""
+        key = strip_urn(key)
+        for s in self.by_type.get("MetadataRegistration", {}).values():
+            if strip_urn(s.get("subject") or "") != key:
+                continue
+            meta_key = strip_urn(s.get("metadata") or "")
+            if (self.blob_integrity(meta_key) or {}).get("status") != "verified":
+                continue
+            meta = self.content(meta_key)
+            if isinstance(meta, dict) and meta.get("storage") == self.BY_REFERENCE:
+                return {"name": meta.get("name"), "reason": meta.get("storage_reason"),
+                        "obtain_from": meta.get("obtain_from")}
+        return None
+
     def registration_info(self, cid: str):
         sid = self.data_cid_to_stmt.get(cid)
         if sid is None:
@@ -577,13 +602,21 @@ class Manifest:
         `missing` lists CIDs a statement references but `blobs` does not
         hold, and `total` counts present + missing. Without it the counts
         only cover blobs that happen to be in the file: deleting a blob
-        shrinks the denominator with it, so N of M would read as N/N."""
-        missing = sorted(c for c in self.content_referenced_cids() if c not in self.blobs)
-        total = len(self.blobs) + len(missing)
+        shrinks the denominator with it, so N of M would read as N/N.
+
+        `by_reference` maps the absent CIDs the signer declared as committed
+        by CID only (see `by_reference_declaration`) to that declaration.
+        They are not in `missing` and not a gap in the record, but they are
+        still unverifiable here, and `total` still counts them."""
+        absent = sorted(c for c in self.content_referenced_cids() if c not in self.blobs)
+        by_reference = {c: d for c in absent for d in [self.by_reference_declaration(c)] if d}
+        missing = [c for c in absent if c not in by_reference]
+        total = len(self.blobs) + len(absent)
         hasher = _cid_hasher()
         if hasher is None:
             return {"status": "unavailable", "matched": 0, "mismatched": [],
-                    "unverifiable": len(self.blobs), "missing": missing, "total": total,
+                    "unverifiable": len(self.blobs), "missing": missing,
+                    "by_reference": by_reference, "total": total,
                     "detail": "eqty_sdk not installed; run the script with `uv run`, or: pip install -r requirements.txt"}
         matched, mismatched, unverifiable, invalid_base64 = 0, [], 0, []
         for key, b64 in self.blobs.items():
@@ -604,7 +637,8 @@ class Manifest:
                 mismatched.append(key)
         return {"status": "verified", "matched": matched,
                 "mismatched": mismatched, "unverifiable": unverifiable,
-                "invalid_base64": invalid_base64, "missing": missing, "total": total}
+                "invalid_base64": invalid_base64, "missing": missing,
+                "by_reference": by_reference, "total": total}
 
     def integrity_check(self):
         """Flag anything that looks structurally wrong: invalid base64,
@@ -625,8 +659,15 @@ class Manifest:
         referenced = self.content_referenced_cids()
         for cid_key in referenced:
             if cid_key not in self.blobs:
-                problems.append({"cid": cid_key, "issue": "missing_blob",
-                                  "detail": "referenced by a statement but no blob present"})
+                declared = self.by_reference_declaration(cid_key)
+                if declared:
+                    problems.append({"cid": cid_key, "issue": "by_reference",
+                                     "detail": "declared by the signer as committed by CID only (%s); "
+                                               "its bytes are not embedded, so they cannot be checked here"
+                                               % (declared.get("reason") or "no reason given")})
+                else:
+                    problems.append({"cid": cid_key, "issue": "missing_blob",
+                                     "detail": "referenced by a statement but no blob present"})
 
         # Content-address verification. A mismatch here means the payload was
         # altered after the manifest was built — the single most important
@@ -878,6 +919,11 @@ class Manifest:
         collection's files) has its own CIDs and its own status."""
         if key not in self.blobs:
             if key in self.content_referenced_cids():
+                declared = self.by_reference_declaration(key)
+                if declared:
+                    return {"status": "by_reference", "declaration": declared,
+                            "detail": "declared by the signer as committed by CID only; not embedded, "
+                                      "so its content cannot be checked without the original file"}
                 return {"status": "missing",
                         "detail": "referenced by a statement but not embedded; its content cannot be checked"}
             return None

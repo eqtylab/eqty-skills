@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.2 — 2026-09-25
+
+- **eqty-manifest** — clearer in a sandbox such as Codex: point `UV_CACHE_DIR` at
+  a writable temp directory when `~/.cache/uv` is not writable; ask network
+  approval for the first verifying run only; never fall back to `--no-verify`
+  unless asked; write the report narrative after the verified run, about what the
+  run did, never whether it verified.
+
 ## 0.1.1 — 2026-09-25
 
 - **eqty-instrument, Mode 2** — step 1 runs under Codex too: `isolated_cfg.py

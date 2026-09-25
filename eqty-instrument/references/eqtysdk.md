@@ -788,11 +788,19 @@ that the recorded relationships match execution.
 - [ ] Verify statement IDs and applicable credentials; bind each credential to the
       expected subject and authorize its issuer/operator separately (§13.3).
 - [ ] Check available blobs with their appropriate CID codec. Report unavailable
-      content explicitly; do not claim its bytes were verified.
+      content explicitly; do not claim its bytes were verified. Every CID left out
+      on purpose carries `storage="by-reference"` and a `storage_reason` in its own
+      metadata (SKILL.md, *Commit to heavy artifacts by CID*); any other absent CID
+      is a loss, not a choice.
 - [ ] Assess missing steps, repeated content, and connectivity against the intended
       workflow. Do not reject valid `Custom` assets, generated names, repeated labels,
       disconnected components, or cycles merely because the old guide banned them.
-- [ ] Review disclosure and prove only the scope actually checked.
+- [ ] Review disclosure and prove only the scope actually checked. Search the
+      **decoded** blobs, not the manifest's JSON, for absolute paths and user
+      names: base64 hides them from a text search. Binary assets can carry paths
+      of their own; a SentencePiece model records its training `input` and
+      `model_prefix`, so a stub tokenizer trained on an absolute path exports that
+      path. Build stubs with relative paths.
 
 Upstream verifier APIs do not validate application truth or cover every blob and
 credential format with one call. See §13.3 and [upstream verification docs][verification-docs].

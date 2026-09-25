@@ -355,6 +355,7 @@ integrity problem at all.
 ```json
 {"status": "verified", "matched": <n>, "total": <present + missing>,
  "mismatched": ["<cid>", ...], "missing": ["<cid>", ...],
+ "by_reference": {"<cid>": {"name": ..., "reason": ..., "obtain_from": ...}},
  "invalid_base64": ["<cid>", ...], "unverifiable": <n>}
 ```
 
@@ -367,6 +368,7 @@ failure reasons mean different things and are never merged:
 |---|---|
 | `mismatched` / `cid_mismatch` | bytes present but do not hash to their CID — content altered after registration |
 | `missing` / `missing_blob` | a statement names the CID but `blobs` does not carry it — not embedded, so unverifiable |
+| `by_reference` / `by_reference` | not embedded either, but **declared**: the CID's own metadata says `storage="by-reference"` with a `storage_reason`, and that metadata blob is embedded and hashes to its CID. The signer's claim, not a check — still unverifiable, but not a gap in the record, so it does not make `summary.py` exit 2 |
 | `invalid_base64` / `invalid_base64` | bytes present but not decodable — cannot be hashed at all |
 
 Each also appears in `integrity_problems` under the issue name shown; a

@@ -518,10 +518,17 @@ procedure, not by reading the SDK.
 
 ## Constraints
 
-- **`store=True` everywhere for now.** `store` controls whether the preimage is
-  captured as a base64 blob in the manifest. `store=False` with no other copy of
-  the content means nothing can ever be verified — the hashes are dead. It costs
-  roughly **2.5x** file size.
+- **`store=True` everywhere for now — except heavy artifacts, declared.**
+  `store` controls whether the preimage is captured as a base64 blob in the
+  manifest. `store=False` with no other copy of the content means nothing can
+  ever be verified — the hashes are dead. It costs roughly **2.5x** file size.
+  The one exception is SKILL.md's *commit to heavy artifacts by CID*: model
+  weights, large datasets, anything the manifest would otherwise become a copy
+  of. Those take `_store=False` **with** `storage="by-reference"` and a
+  `storage_reason` in the same registration, and are listed as a gap. Judge by
+  what the target loads in real use, not by the stub the example runs on. An
+  absent CID without that declaration is a defect, and the read side reports it
+  as missing.
 - **Compute nodes have no type label in the SDK.** Asset types apply only to
   hashable entities, so a computation cannot carry one. Put the CFG's own label
   on it as metadata — `computation_type`: `ingest`, `transform`, `model_call`,
@@ -580,6 +587,8 @@ procedure, not by reading the SDK.
 - [ ] The SDK directory the entry point initialises, with its signer key, is outside the user's tracked files.
 - [ ] Connectivity matches the prediction, or every extra component is explained.
 - [ ] Every node's `computation_type` metadata is set.
+- [ ] Every `_store=False` registration carries `storage="by-reference"` and a `storage_reason`, is a heavy artifact by what the target loads in real use, and is listed as a gap. Nothing else is `_store=False`.
+- [ ] No decoded blob holds an absolute path or a user name — stubs are built with relative paths (`references/eqtysdk.md` §11).
 - [ ] `references/eqtysdk.md` §11 worked, and `<skill-dir>/check_graph.py <manifest> --expect-computations N --expect-components N` passes; its reported items all appear in the patch's gap list.
 - [ ] Exactly one manifest, exactly as emitted — no repaired or context-embedded second copy.
 - [ ] Anything stubbed for the example is named in the patch, with what the manifest therefore does not claim.

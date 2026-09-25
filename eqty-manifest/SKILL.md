@@ -116,9 +116,13 @@ uv run <skill-dir>/parse_manifest.py <manifest> show <cid-or-statement-id>
 
 Never decode a blob with a snippet of your own. `show` follows collections
 and HashSeqs, classifies the content, and reports the blob's
-`content_integrity`: `verified`, `tampered`, `invalid_base64`, `missing` or
-`not_checked`. Quote content from a `tampered` blob only as *what the altered
-bytes now say*, never as what happened. A one-liner does none of this. And do
+`content_integrity`: `verified`, `tampered`, `invalid_base64`, `missing`,
+`by_reference` or `not_checked`. Quote content from a `tampered` blob only as *what the altered
+bytes now say*, never as what happened. A `by_reference` blob was left out on
+purpose: its signer declared it (`storage="by-reference"`, with a reason) in
+metadata that is itself embedded and intact. Say it is committed by hash only
+and cannot be checked without the original file; never call it missing or
+lost, and never call it verified. A one-liner does none of this. And do
 not dump `verify_credentials.py`'s full JSON to re-derive what the block
 already says.
 
@@ -135,7 +139,13 @@ uv run <skill-dir>/summary.py manifest.json
 - **First run needs network**, to fetch `eqty-sdk`, `cryptography` and `base58`
   (prebuilt wheels, about 15 MB). In a sandbox that blocks network, ask the user
   to allow it for that one command, or to run it once themselves. After that it
-  works offline.
+  works offline. The command to ask for is the first *verifying* run —
+  `summary.py`, or `report.py` without `--no-verify` — never a broader standing
+  approval for every `uv run`.
+- **A sandbox that cannot write `~/.cache/uv`** (Codex's can't) makes `uv run`
+  fail with "Failed to initialize cache". Point uv at a writable temp directory:
+  `UV_CACHE_DIR="${TMPDIR:-/tmp}/eqty-uv-cache" uv run <skill-dir>/summary.py manifest.json`,
+  and use the same `UV_CACHE_DIR` on every later command so the cache is reused.
 - **No `uv`?** Install the same three packages with
   `pip install -r <skill-dir>/requirements.txt`, then run the scripts with
   `python3` in place of `uv run`.
@@ -143,6 +153,9 @@ uv run <skill-dir>/summary.py manifest.json
   standard library alone. Without the packages, every verification reports
   *not checked* — never a pass. Say so rather than presenting a partial answer
   as verified.
+- **Never pass `--no-verify` unless the user asked for an unverified report.**
+  If the packages cannot be installed, ask for the network approval or tell the
+  user; do not downgrade to a report whose trust checks all read *not checked*.
 
 ## The verification summary: every check in one block
 
@@ -310,6 +323,11 @@ uv run <skill-dir>/report.py manifest.json report.html
 uv run <skill-dir>/report.py manifest.json report.html \
     --narrative "$SCRATCH/notes.md"
 ```
+
+**Write the narrative after the verified run, and only about what the run
+did** — the task, the steps, the tools, the output. Never state in it whether
+the manifest verified: the report's trust section computes that, and a
+sentence written before the checks ran goes stale the moment they do.
 
 Before passing that narrative, walk it sentence by sentence against rule 1
 above and name the manifest evidence for each one. Prose is the only part

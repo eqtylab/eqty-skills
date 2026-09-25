@@ -1,128 +1,111 @@
-"""Small, scripted run of `example_text_completion.py` on a laptop, no weights, no GPU.
+"""Run the instrumented llama chat example on CPU, with no downloaded weights, and export a manifest.
 
-Scaffolding only: nothing in this file is instrumented. It stubs three boundaries
-and leaves every line of the target's own logic to run as shipped:
+Scaffolding written by the eqty-instrument skill. It is not part of the target and
+carries no instrumentation of its own: the only node in the manifest is the one
+inside llama/generation.py:Llama.generate.
 
-1. **Weights and tokenizer.** Llama 2 weights are licence-gated and 13 GB. This
-   builds a tiny random checkpoint (`consolidated.00.pth` + `params.json`, same
-   layout `Llama.build` reads) and trains a ~400-piece SentencePiece model.
-   A manifest from this run therefore says nothing about any real Llama model:
-   the tokens it records come from random weights.
-2. **The GPU.** The target hard-codes CUDA (`nccl`, `torch.cuda.set_device`,
-   `cuda.HalfTensor`, `device="cuda"`, `.cuda()`). Those calls are redirected to
-   CPU / float32 / `gloo`, so the numbers are not what a GPU in fp16 would give.
-3. **torchrun.** The rendezvous env vars a single-process `torchrun
-   --nproc_per_node 1` would set are set here instead.
+What is stubbed (the boundary, not the logic):
+  - weights:   a tiny Transformer (dim 64, 2 layers) with seeded random weights,
+               saved as stub/ckpt/consolidated.00.pth + params.json;
+  - tokenizer: a small SentencePiece model trained here on the text of
+               the repo's Markdown docs (untouched by the patch), saved as
+               stub/tokenizer.model;
+  - hardware:  CUDA -> CPU (device="cuda" arguments, Tensor.cuda(), set_device,
+               the cuda.HalfTensor default type, so float32 instead of fp16),
+               and NCCL -> a gloo process group initialised here (world size 1).
 
-Then it runs the target's own command line, unchanged:
+Everything else runs as shipped: example_chat_completion.main with its six
+dialogs and default flags, Llama.build (checkpoint glob, params.json,
+model-parallel init, Tokenizer, Transformer, load_state_dict), chat_completion,
+generate, Transformer.forward, sample_top_p and Tokenizer.decode.
 
-    example_text_completion.py --ckpt_dir <stub> --tokenizer_path <stub>
-                               --max_seq_len 128 --max_batch_size 4
-
-which initialises the SDK in its working directory (`.eqty/`), and exports
-`.eqty/manifests/text_completion.json`. Run this from a scratch directory.
-
-    python run_example.py [--repo <path to the llama checkout>]
+    ../../venv/bin/python run_example.py      # from this directory
 """
 
-import argparse
 import json
 import os
-import runpy
 import sys
-import tempfile
 from pathlib import Path
 
-import sentencepiece as spm
 import torch
 
 HERE = Path(__file__).resolve().parent
+os.chdir(HERE)
+sys.path.insert(0, str(HERE))
 
-parser = argparse.ArgumentParser()
-parser.add_argument("--repo", default=str(HERE))
-args = parser.parse_args()
-repo = Path(args.repo).resolve()
+# --- hardware stub: CUDA -> CPU ---------------------------------------------------
+_full, _tensor = torch.full, torch.tensor
 
-# -- 3. torchrun --------------------------------------------------------------------
-os.environ.update(
-    RANK="0", LOCAL_RANK="0", WORLD_SIZE="1", MASTER_ADDR="127.0.0.1", MASTER_PORT="29533"
-)
 
-# -- 2. the GPU boundary: CUDA -> CPU -----------------------------------------------
-_init_pg = torch.distributed.init_process_group
-torch.distributed.init_process_group = lambda backend=None, *a, **k: _init_pg("gloo", *a, **k)
-torch.cuda.set_device = lambda *a, **k: None
-torch.set_default_tensor_type = lambda *a, **k: None  # stays CPU float32
+def _cpu(kwargs):
+    if str(kwargs.get("device", "")).startswith("cuda"):
+        kwargs["device"] = "cpu"
+    return kwargs
+
+
+torch.full = lambda *a, **k: _full(*a, **_cpu(k))
+torch.tensor = lambda *a, **k: _tensor(*a, **_cpu(k))
 torch.Tensor.cuda = lambda self, *a, **k: self
+torch.cuda.set_device = lambda *a, **k: None
+_set_default_tensor_type = torch.set_default_tensor_type
+torch.set_default_tensor_type = lambda t: None if "cuda" in str(t) else _set_default_tensor_type(t)
 
-
-def _on_cpu(fn):
-    def call(*a, **k):
-        if str(k.get("device", "")).startswith("cuda"):
-            k["device"] = "cpu"
-        return fn(*a, **k)
-
-    return call
-
-
-torch.full = _on_cpu(torch.full)
-torch.tensor = _on_cpu(torch.tensor)
-
-# -- 1. weights and tokenizer -------------------------------------------------------
-stub = Path(tempfile.mkdtemp(prefix="llama-stub-"))
-corpus = stub / "corpus.txt"
-corpus.write_text(
-    "\n".join(
-        [
-            "I believe the meaning of life is to find your gift.",
-            "Simply put, the theory of relativity states that time is relative.",
-            "A brief message congratulating the team on the launch.",
-            "Hi everyone, I just wanted to say congratulations.",
-            "Translate English to French: sea otter => loutre de mer",
-            "peppermint => menthe poivree, plush girafe => girafe peluche, cheese => fromage",
-        ]
-        * 20
-    )
+# --- distributed stub: NCCL -> gloo, world size 1 -----------------------------------
+os.environ.update(WORLD_SIZE="1", LOCAL_RANK="0", RANK="0")
+STUB = HERE / "stub"
+STUB.mkdir(exist_ok=True)
+(STUB / "gloo-store").unlink(missing_ok=True)
+torch.distributed.init_process_group(
+    "gloo", init_method=f"file://{STUB / 'gloo-store'}", rank=0, world_size=1
 )
-spm.SentencePieceTrainer.train(
-    input=str(corpus),
-    model_prefix=str(stub / "tokenizer"),
-    vocab_size=400,
-    minloglevel=2,
-    model_type="bpe",
-    byte_fallback=True,
-    character_coverage=1.0,
-)
-n_words = spm.SentencePieceProcessor(model_file=str(stub / "tokenizer.model")).vocab_size()
 
-ckpt = stub / "ckpt"
-ckpt.mkdir()
-params = {"dim": 64, "n_layers": 2, "n_heads": 4, "multiple_of": 32, "norm_eps": 1e-5}
-(ckpt / "params.json").write_text(json.dumps(params))
-
-sys.path.insert(0, str(repo))
-from llama.model import ModelArgs, Transformer  # noqa: E402  (the target's own class)
-
-torch.distributed.init_process_group("gloo")
+import sentencepiece as spm  # noqa: E402
 import fairscale.nn.model_parallel.initialize as fs_init  # noqa: E402
 
-fs_init.initialize_model_parallel(1)
-torch.manual_seed(0)
-model = Transformer(ModelArgs(max_seq_len=128, max_batch_size=4, vocab_size=n_words, **params))
-with torch.no_grad():  # the target builds with identity init; give the stub real random weights
-    for name, p in model.named_parameters():
-        p.copy_(torch.ones_like(p) if "norm" in name else torch.randn_like(p) * 0.2)
-torch.save(model.state_dict(), ckpt / "consolidated.00.pth")
-del model
-fs_init.destroy_model_parallel()  # leave Llama.build to do its own setup
-torch.distributed.destroy_process_group()
+from eqty_sdk import Context, Signer, init, set_active_signer  # noqa: E402
+from llama.model import ModelArgs, Transformer  # noqa: E402
+import example_chat_completion  # noqa: E402
 
-# -- the target's own command line --------------------------------------------------
-sys.argv = [
-    str(repo / "example_text_completion.py"),
-    "--ckpt_dir", str(ckpt),
-    "--tokenizer_path", str(stub / "tokenizer.model"),
-    "--max_seq_len", "128",
-    "--max_batch_size", "4",
-]
-runpy.run_path(sys.argv[0], run_name="__main__")
+# --- weights / tokenizer stub ---------------------------------------------------------
+CKPT = STUB / "ckpt"
+CKPT.mkdir(parents=True, exist_ok=True)
+TOKENIZER = STUB / "tokenizer.model"
+
+DOCS = ["README.md", "MODEL_CARD.md", "USE_POLICY.md", "CONTRIBUTING.md", "UPDATES.md"]  # untouched by the patch
+corpus = [line for doc in DOCS for line in Path(doc).read_text().splitlines() if line.strip()]
+spm.SentencePieceTrainer.train(
+    sentence_iterator=iter(corpus),
+    model_prefix="stub/tokenizer",  # relative: the path is embedded in the model file
+    vocab_size=2000,
+    hard_vocab_limit=False,
+    model_type="bpe",
+    character_coverage=1.0,
+    num_threads=1,
+    minloglevel=2,
+)
+n_words = spm.SentencePieceProcessor(model_file=str(TOKENIZER)).vocab_size()
+
+params = {"dim": 64, "n_layers": 2, "n_heads": 4, "multiple_of": 16, "norm_eps": 1e-5, "vocab_size": -1}
+(CKPT / "params.json").write_text(json.dumps(params))
+fs_init.initialize_model_parallel(1)
+model = Transformer(ModelArgs(max_seq_len=512, max_batch_size=8, **{**params, "vocab_size": n_words}))
+g = torch.Generator().manual_seed(0)
+state = {
+    k: (torch.ones_like(v) if "norm" in k else torch.randn(v.shape, generator=g) * 0.02)
+    for k, v in model.state_dict().items()
+}
+torch.save(state, CKPT / "consolidated.00.pth")
+del model
+fs_init.destroy_model_parallel()  # Llama.build initialises model parallel itself
+
+# --- SDK: initialise once, run the target's own entry point, export once --------------
+cfg = init(default_context=Context.new("llama hitl run_example"), custom_dir=HERE / ".eqty").set_store_all_blobs(True)
+set_active_signer(Signer.load_or_create(name="llama"))
+
+# Same call fire.Fire(main) makes for:
+#   example_chat_completion.py --ckpt_dir stub/ckpt --tokenizer_path stub/tokenizer.model
+example_chat_completion.main(ckpt_dir=str(CKPT), tokenizer_path=str(TOKENIZER))
+
+manifest = HERE.parent / "llama.hitl.manifest.json"
+cfg.get_default_context().export(manifest)
+print(f"manifest: {manifest}")

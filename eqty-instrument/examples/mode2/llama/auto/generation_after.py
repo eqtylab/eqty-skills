@@ -11,7 +11,17 @@ from typing import List, Literal, Optional, Tuple, TypedDict
 
 import torch
 import torch.nn.functional as F
-from eqty_sdk import Code, Computation, Configuration, Custom, Dataset, Model, Prompt
+from eqty_sdk import (
+    Binary,
+    Code,
+    Computation,
+    Configuration,
+    Dataset,
+    Document,
+    Model,
+    Prompt,
+    get_cid_for_bytes,
+)
 from fairscale.nn.model_parallel.initialize import (
     get_model_parallel_rank,
     initialize_model_parallel,
@@ -107,11 +117,8 @@ class Llama:
         ), f"Loading a checkpoint for MP={len(checkpoints)} but world size is {model_parallel_size}"
         ckpt_path = checkpoints[get_model_parallel_rank()]
         checkpoint = torch.load(ckpt_path, map_location="cpu")
-        # Weights are committed by CID only; the shard is far too large to embed.
-        weights = Model.from_path(ckpt_path, name="Checkpoint shard", _store=False)
         with open(Path(ckpt_dir) / "params.json", "r") as f:
             params = json.loads(f.read())
-        params_file = Configuration.from_path(Path(ckpt_dir) / "params.json", name="params.json")
 
         model_args: ModelArgs = ModelArgs(
             max_seq_len=max_seq_len,
@@ -119,26 +126,38 @@ class Llama:
             **params,
         )
         tokenizer = Tokenizer(model_path=tokenizer_path)
-        tokenizer_file = Model.from_path(tokenizer_path, name="SentencePiece tokenizer model")
         model_args.vocab_size = tokenizer.n_words
         torch.set_default_tensor_type(torch.cuda.HalfTensor)
         model = Transformer(model_args)
         model.load_state_dict(checkpoint, strict=False)
-        model_config = Configuration.from_object(vars(model_args), name="Model configuration (ModelArgs)")
-        (
-            Computation.new(
-                name="Load Llama checkpoint and tokenizer",
-                computation_type="ingest",
-                description="Read this rank's checkpoint shard, params.json and the tokenizer model; build the Transformer.",
-                seed=seed,
-                model_parallel_size=model_parallel_size,
-            )
-            .add_input_cid(Code.from_object(inspect.getsource(Llama.build), name="build").cid)
-            .add_input_cid([weights.cid, params_file.cid, tokenizer_file.cid])
-            .add_output_cid(model_config.cid)
-            .finalize()
-        )
         print(f"Loaded in {time.time() - start_time:.2f} seconds")
+
+        Computation.new(
+            name="Load checkpoint and tokenizer",
+            computation_type="ingest",
+            description="Llama.build: load this rank's checkpoint shard, params.json and the SentencePiece tokenizer into a model configuration and a Transformer",
+            checkpoint_shard=ckpt_path.name,
+            model_parallel_size=model_parallel_size,
+            seed=seed,
+            _store=True,
+        ).add_input_cid(
+            [
+                Code.from_object(inspect.getsource(Llama.build), name="Llama.build").cid,
+                # weights are committed by CID only; their bytes stay out of the manifest
+                Model.from_path(
+                    ckpt_path,
+                    name=f"Checkpoint shard {ckpt_path.name}",
+                    _store=False,
+                    storage="by-reference",
+                    storage_reason="model weights: whatever checkpoint this run loads is committed by hash only (real Llama 2 shards are several GB, and the Llama 2 license restricts redistributing them)",
+                    obtain_from="Meta Llama 2 download (download.sh)",
+                ).cid,
+                Configuration.from_path(Path(ckpt_dir) / "params.json", name="params.json").cid,
+                Binary.from_path(tokenizer_path, name="SentencePiece tokenizer model").cid,
+            ]
+        ).add_output_cid(
+            Configuration.from_object(model_args, name="Model configuration (ModelArgs)").cid
+        ).finalize()
 
         return Llama(model, tokenizer)
 
@@ -176,8 +195,24 @@ class Llama:
 
         """
         params = self.model.params
-        model_config = Configuration.from_object(vars(params), name="Model configuration (ModelArgs)")
-        prompt_ids = Dataset.from_object(prompt_tokens, name="Prompt token ids")
+        generation = Computation.new(
+            name="Generate",
+            computation_type="model_call",
+            description="Llama.generate: autoregressive decoding with temperature and nucleus (top-p) sampling",
+            temperature=temperature,
+            top_p=top_p,
+            max_gen_len=max_gen_len,
+            logprobs=logprobs,
+            echo=echo,
+            seed=torch.initial_seed(),
+            _store=True,
+        ).add_input_cid(
+            [
+                Code.from_object(inspect.getsource(Llama.generate), name="Llama.generate").cid,
+                Dataset.from_object(prompt_tokens, name="Prompt tokens").cid,
+                Configuration.from_object(params, name="Model configuration (ModelArgs)").cid,
+            ]
+        )
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
 
@@ -250,24 +285,11 @@ class Llama:
                 probs = probs[:eos_idx] if logprobs else None
             out_tokens.append(toks)
             out_logprobs.append(probs)
-        generation = (
-            Computation.new(
-                name="Generate tokens with Llama",
-                computation_type="model_call",
-                description="Autoregressive decoding over the batch of prompts.",
-                sampler="top_p" if temperature > 0 else "greedy",
-                temperature=temperature,
-                top_p=top_p,
-                max_gen_len=max_gen_len,
-                logprobs=logprobs,
-                echo=echo,
-            )
-            .add_input_cid(Code.from_object(inspect.getsource(Llama.generate), name="generate").cid)
-            .add_input_cid([prompt_ids.cid, model_config.cid])
-            .add_output_cid(Dataset.from_object(out_tokens, name="Generated token ids").cid)
-        )
+        generation.add_output_cid(Dataset.from_object(out_tokens, name="Generated tokens").cid)
         if logprobs:
-            generation.add_output_cid(Dataset.from_object(out_logprobs, name="Generated token logprobs").cid)
+            generation.add_output_cid(
+                Dataset.from_object(out_logprobs, name="Generated token log-probs").cid
+            )
         generation.finalize()
         return (out_tokens, out_logprobs if logprobs else None)
 
@@ -356,8 +378,19 @@ class Llama:
         """
         if max_gen_len is None:
             max_gen_len = self.model.params.max_seq_len - 1
-        dialogs_in = Prompt.from_object(dialogs, name="Chat dialogs")
-        code = Code.from_object(inspect.getsource(Llama.chat_completion), name="chat_completion")
+        code = Code.from_object(inspect.getsource(Llama.chat_completion), name="Llama.chat_completion")
+        tokenizer_model = Binary.from_cid(
+            get_cid_for_bytes(self.tokenizer.sp_model.serialized_model_proto(), _store=True),
+            name="SentencePiece tokenizer model",
+        )
+        screening = Computation.new(
+            name="Screen and format dialogs",
+            computation_type="transform",
+            description="Llama.chat_completion: flag dialogs containing special tags, fold system prompts, check roles, encode [INST] turns",
+            _store=True,
+        ).add_input_cid(
+            [code.cid, tokenizer_model.cid, Prompt.from_object(dialogs, name="Dialogs").cid]
+        )
         prompt_tokens = []
         unsafe_requests = []
         for dialog in dialogs:
@@ -403,18 +436,12 @@ class Llama:
                 eos=False,
             )
             prompt_tokens.append(dialog_tokens)
-        unsafe_flags = Custom.from_object(unsafe_requests, name="Special-tag (unsafe) flags per dialog")
-        (
-            Computation.new(
-                name="Format and screen chat dialogs",
-                computation_type="transform",
-                description="Fold system prompts, wrap turns in [INST] tags, encode; flag dialogs containing special tags.",
-            )
-            .add_input_cid([code.cid, dialogs_in.cid])
-            .add_output_cid(Dataset.from_object(prompt_tokens, name="Prompt token ids").cid)
-            .add_output_cid(unsafe_flags.cid)
-            .finalize()
-        )
+        screening.add_output_cid(
+            [
+                Dataset.from_object(prompt_tokens, name="Prompt tokens").cid,
+                Dataset.from_object(unsafe_requests, name="Unsafe-request flags").cid,
+            ]
+        ).finalize()
 
         generation_tokens, generation_logprobs = self.generate(
             prompt_tokens=prompt_tokens,
@@ -423,7 +450,23 @@ class Llama:
             top_p=top_p,
             logprobs=logprobs,
         )
+        decision = Computation.new(
+            name="Decide unsafe and decode replies",
+            computation_type="decide",
+            description="Llama.chat_completion: replace replies to flagged dialogs with UNSAFE_ERROR, decode the rest",
+            _store=True,
+        ).add_input_cid(
+            [
+                code.cid,
+                tokenizer_model.cid,
+                Dataset.from_object(generation_tokens, name="Generated tokens").cid,
+                Dataset.from_object(unsafe_requests, name="Unsafe-request flags").cid,
+            ]
+        )
         if logprobs:
+            decision.add_input_cid(
+                Dataset.from_object(generation_logprobs, name="Generated token log-probs").cid
+            )
             predictions = [
                 {
                     "generation": {
@@ -449,17 +492,9 @@ class Llama:
                 }
                 for t, unsafe in zip(generation_tokens, unsafe_requests)
             ]
-        gate = (
-            Computation.new(
-                name="Apply unsafe-tag gate and decode replies",
-                computation_type="decide",
-                description="Flagged dialogs get UNSAFE_ERROR; the rest are decoded to assistant messages.",
-            )
-            .add_input_cid([code.cid, Dataset.from_object(generation_tokens, name="Generated token ids").cid, unsafe_flags.cid])
-        )
-        if logprobs:
-            gate.add_input_cid(Dataset.from_object(generation_logprobs, name="Generated token logprobs").cid)
-        gate.add_output_cid(Dataset.from_object(predictions, name="Chat predictions").cid).finalize()
+        decision.add_output_cid(
+            Document.from_object(predictions, name="Chat predictions").cid
+        ).finalize()
         return predictions
 
 

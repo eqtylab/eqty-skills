@@ -33,11 +33,6 @@ def main(
         max_gen_len (int, optional): The maximum length of generated sequences. Defaults to 64.
         max_batch_size (int, optional): The maximum batch size for generating sequences. Defaults to 4.
     """ 
-    # EQTY lineage: once per process, before anything is recorded. The SDK directory
-    # (with the signer key) lives in .eqty/, which .gitignore keeps untracked.
-    cfg = init(default_context=Context.new("llama example_text_completion"), custom_dir=Path(".eqty")).set_store_all_blobs(True)
-    set_active_signer(Signer.load_or_create(name="llama"))
-
     generator = Llama.build(
         ckpt_dir=ckpt_dir,
         tokenizer_path=tokenizer_path,
@@ -73,10 +68,13 @@ def main(
         print(f"> {result['generation']}")
         print("\n==================================\n")
 
-    cfg.get_default_context().export(
-        Path(f"eqty-manifests/example_text_completion.rank{os.environ.get('RANK', '0')}.json")
-    )
-
 
 if __name__ == "__main__":
+    # EQTY lineage: SDK directory (and signer key) under .eqty/, which .gitignore excludes
+    eqty_dir = Path(os.environ.get("EQTY_DIR", ".eqty"))
+    cfg = init(default_context=Context.new("llama text_completion"), custom_dir=eqty_dir).set_store_all_blobs(True)
+    set_active_signer(Signer.load_or_create(name="llama"))
     fire.Fire(main)
+    cfg.get_default_context().export(
+        Path(os.environ.get("EQTY_MANIFEST", eqty_dir / "manifests" / f"text_completion.rank{os.environ.get('RANK', 0)}.json"))
+    )

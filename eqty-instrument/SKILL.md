@@ -254,6 +254,27 @@ is no longer a blocker, and there is no post-export repair step.
 datasets and code belong in the manifest as content-addressed references. A
 manifest that inlines them stops being a record and starts being a copy.
 
+**And declare it, so the read side can tell it from a loss.** An asset whose
+bytes are left out is otherwise indistinguishable from one that went missing:
+`eqty-manifest` reports both as a missing pre-image. Register it with
+`_store=False` and three metadata keywords on the same call:
+
+```python
+Model.from_path(ckpt_path, name="Checkpoint shard consolidated.00.pth", _store=False,
+                storage="by-reference",
+                storage_reason="model weights; real shards are several GB and licensed",
+                obtain_from="Meta Llama 2 download (download.sh)")   # optional
+```
+
+`storage="by-reference"` is the declaration; `storage_reason` says why, in
+words that stay true for whatever file the code loads (it is signed, and a stub
+run makes it about the stub: "real shards are several GB", not "this is 13 GB"); `obtain_from` says where the bytes can be had. The
+read side then lists the asset as *by reference*, not *missing*. Decide by what
+the code loads in real use, not by the size of a stub: a 1 MB stand-in
+checkpoint is still weights. The declaration is a claim by the signer, not a
+check, so report every by-reference asset as a gap as well. Everything else
+stays `_store=True`.
+
 **Emit the manifest, and nothing else.** One file, exactly as the SDK exported
 it — no repaired copy, no context-embedded twin, no post-export rewrite of the
 emitter's own output. A second copy is a second thing to keep in sync, and a
@@ -297,4 +318,4 @@ do not open a pull request against a repository you were not pointed at.
 | `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
 | `isolated_cfg.py` | Mode 2 step 1: runs the L1 and L2 CFG agents as fresh, isolated `claude -p` or `codex exec` processes and checks nothing leaked |
 | `examples/mode1/` | real Mode 1 runs — `*_before.py`, `*_after.py`, `changes.diff` |
-| `examples/mode2/` | real Mode 2 runs, auto and HITL — before, after, diff, manifest |
+| `examples/mode2/` | real Mode 2 runs, auto and HITL — before, after, diff, manifest, the node selection (`nodes.md`) and the placement and review doc (`placement.md`) |

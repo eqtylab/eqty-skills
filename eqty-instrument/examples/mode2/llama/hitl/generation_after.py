@@ -11,7 +11,7 @@ from typing import List, Literal, Optional, Tuple, TypedDict
 
 import torch
 import torch.nn.functional as F
-from eqty_sdk import Code, Computation, Token
+from eqty_sdk import Code, Computation, Configuration, Token
 from fairscale.nn.model_parallel.initialize import (
     get_model_parallel_rank,
     initialize_model_parallel,
@@ -158,6 +158,12 @@ class Llama:
 
         """
         params = self.model.params
+        # EQTY: record the model configuration and the prompt tokens this call reads
+        params_asset = Configuration.from_object(params, name="model params", _store=True)
+        prompt_assets = [
+            Token.from_object(t, name=f"prompt tokens [{k}]", _store=True)
+            for k, t in enumerate(prompt_tokens)
+        ]
         bsz = len(prompt_tokens)
         assert bsz <= params.max_batch_size, (bsz, params.max_batch_size)
 
@@ -230,27 +236,36 @@ class Llama:
                 probs = probs[:eos_idx] if logprobs else None
             out_tokens.append(toks)
             out_logprobs.append(probs)
-
-        # EQTY lineage: record this model call. Inputs are this function's own source
-        # and the prompt token ids it received; outputs are the raw generated token ids
-        # it returns, one Token per prompt. Sampler settings and seed are metadata: they
-        # record what the run used, they do not make it reproducible.
+        # EQTY: record this model call, from its code and prompt tokens to the raw tokens it returns
         (
             Computation.new(
                 name="Llama.generate",
-                description="Model call: sample a continuation for each prompt",
+                description="Autoregressive model call: sample next tokens for each prompt until EOS or max_gen_len",
                 computation_type="model_call",
                 temperature=temperature,
                 top_p=top_p,
                 max_gen_len=max_gen_len,
                 logprobs=logprobs,
                 echo=echo,
-                seed=torch.initial_seed(),
+                torch_initial_seed=torch.initial_seed(),
                 _store=True,
             )
-            .add_input_cid(Code.from_object(inspect.getsource(Llama.generate), name="Llama.generate", _store=True).cid)
-            .add_input_cid([Token.from_object(t, name="Prompt tokens", _store=True).cid for t in prompt_tokens])
-            .add_output_cid([Token.from_object(t, name="Generated tokens (raw)", _store=True).cid for t in out_tokens])
+            .add_input_cid(
+                Code.from_object(
+                    inspect.getsource(Llama.generate),
+                    name="generate",
+                    description=Llama.generate.__doc__,
+                    _store=True,
+                ).cid
+            )
+            .add_input_cid(params_asset.cid)
+            .add_input_cid([a.cid for a in prompt_assets])
+            .add_output_cid(
+                [
+                    Token.from_object(t, name=f"raw generated tokens [{i}]", _store=True).cid
+                    for i, t in enumerate(out_tokens)
+                ]
+            )
             .finalize()
         )
         return (out_tokens, out_logprobs if logprobs else None)
