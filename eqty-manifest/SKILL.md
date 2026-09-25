@@ -210,11 +210,19 @@ How to read it:
   A **TPM** quote has no vendor chain of its own: its attestation key is trusted
   only through *hardware binding* to a report that verified (the line then says
   "vendor chain not needed"). Without that binding it is never verified.
-- **Known gap: key binding.** Whether a report's signed key material derives
-  to the DID it claims is never checked: the commitment rule is defined in
-  EQTY's vcomp code, is not recoverable from the evidence, and integrity-py does
-  not expose it. Every hardware line says so. When asked "is this hardware bound
-  to that identity", say it is not verified here.
+- **Key binding** — does the hardware vouch for the DID it claims? Checked
+  through a TPM quote whose credential declares `userData: {type: "key"}`: the
+  quote's extraData must be the DID's public key. It reads *verified* only when
+  the quote itself verified and is bound to a verified hardware report, and that
+  report then reads *verified (through the TPM quote)*. A mismatch is a failure.
+  It shows the attested VM vouched for the DID, not that the key never left it —
+  that rests on the measured software, which is not compared with reference
+  values.
+- **Known gap: key binding without a TPM quote.** For a bare Intel TDX, AMD
+  SEV-SNP or NVIDIA report, the commitment rule is defined in EQTY's vcomp code
+  and integrity-py does not expose it, so those lines read *not checked*. When
+  asked "is this hardware bound to that identity" about such a report, say it
+  is not verified here.
 
 Exit code: **0** everything verified, **1** something failed or was tampered
 with, **2** nothing failed but something is unchecked or missing — including a

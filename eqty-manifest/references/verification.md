@@ -293,7 +293,7 @@ It handles Intel TDX quotes, AMD SEV-SNP reports (both the older
 signature, and — for TDX — that the attestation key is bound to the QE report.
 
 **TPM 2.0 quotes (`VCompTpmEvidenceV1`, e.g. an Azure confidential VM's vTPM)**
-are checked in three parts, each reported separately:
+are checked in four parts, each reported separately:
 
 1. **Quote signature** — the quote verifies under the evidence's `AKPublicKey`
    (RSASSA or RSA-PSS over SHA-256/384).
@@ -307,13 +307,25 @@ are checked in three parts, each reported separately:
    `HCLAkPub` must be this attestation key. `report_data` sits at byte `0x50` of
    the AMD report and at byte 568 of the TDX quote (the TD report's
    `REPORTDATA`, after the 48-byte quote header).
+4. **Key binding** (`key_bound_to_did`) — when the credential declares
+   `identity.userData = {type: "key", value: <DID>}`, the value must be the
+   credential's own subject and the quote's `extraData` (TPM2 qualifying data)
+   must be that DID's P-256 public-key **X coordinate** — the compressed key
+   without its `02`/`03` prefix. This is the rule observed in every EQTY TPM
+   quote seen (three, bound through AMD and through TDX), not a published spec.
+   It counts only when parts 1 and 3 verified; the hardware report the quote is
+   bound to then reads bound to the DID *through the TPM quote*. For any other
+   DID type no check is added and key binding stays *not checked*.
+
+Which of these links are Azure's: part 3's runtime-data layout (`HCLAkPub`,
+`report_data` = SHA-256 of the runtime JSON) is Azure's paravisor; part 4 is
+EQTY's convention and plain TPM 2.0.
 
 No TPM root is pinned, so the attestation key's certificate (issued by
 Microsoft's vTPM CA) is **not** checked; the hardware binding replaces it. A
 quote whose key has no such binding stays *not checked*: a signature by a key
 the file itself supplies proves nothing. As with every vendor, the PCR *values*
-are not compared with expected ones, and the quote's binding to the DID is the
-key-binding gap. Chains are checked
+are not compared with expected ones. Chains are checked
 against **pinned vendor roots in `roots/`**, never against the root that
 shipped inside the evidence: every evidence blob embeds a self-consistent
 chain, so trusting its own root would verify a forgery just as happily.

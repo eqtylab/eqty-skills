@@ -607,12 +607,14 @@ def _summary_pills(v):
     st = {k: sum(t[k] for t in stmt) for k in ("verified", "failed", "total")}
     cr = {k: sum(t[k] for _, t in v["signers"]) for k in ("verified", "failed", "total")}
     hw = v["hardware"]["items"]
-    hw_bad = sum(1 for h in hw if h["signature"] is False or h["chain"] is False)
+    hw_bad = sum(1 for h in hw if h["signature"] is False or h["chain"] is False or h.get("key_binding") is False)
     links_bad = sum(1 for l in v["executed_on"] if not l["present"])
     env_cls = "bad" if hw_bad or links_bad else "warn" if any(
         h["signature"] is None or h["chain"] is None for h in hw) else "ok" if hw else "unk"
+    unbound = sum(1 for h in hw if h.get("key_binding") is not True)
     env = ("%d of %d hardware reports failed" % (hw_bad, len(hw)) if hw_bad else
-           "%d hardware report(s), key binding not checked" % len(hw) if hw else
+           "%d hardware report(s), key binding %s" % (len(hw), "verified" if not unbound else
+           "not checked" if unbound == len(hw) else "not checked for %d" % unbound) if hw else
            "no hardware evidence")
     if links_bad:
         env += "; %d executedOn link(s) name no system" % links_bad
@@ -763,11 +765,13 @@ def _verification_html(v):
                 chain = (_pill("ok", "not needed — key bound to verified hardware")
                          if i.get("chain_via_binding") else _pill(*STATE[i["chain"]]))
                 binding = _pill(*STATE[i["binding"]]) if i.get("has_binding") else "—"
+                cls, txt = STATE[i.get("key_binding")]
+                key = _pill(cls, txt + (" — %s" % i["key_binding_via"] if i.get("key_binding_via") else ""))
                 a("<tr><td class='did'>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
-                    E(i["label"]), _pill(*STATE[i["signature"]]), chain, binding,
-                    _pill("unk", "not checked")))
+                    E(i["label"]), _pill(*STATE[i["signature"]]), chain, binding, key))
             a("</tbody></table></div>")
-            a('<p class="note">%s</p>' % E(SM.KEY_BINDING_GAP))
+            if any(i.get("key_binding") is None for i in hw["items"]):
+                a('<p class="note">%s</p>' % E(SM.KEY_BINDING_GAP))
     return "\n".join(h)
 
 

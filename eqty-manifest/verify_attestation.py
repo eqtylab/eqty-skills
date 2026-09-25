@@ -378,9 +378,29 @@ def parse_tpm_quote(q: bytes):
             "measurements": {"pcr_digest": digest.hex()}, "_digest": digest}
 
 
-def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None, bindings=()):
+def did_key_x(did):
+    """The X coordinate of a P-256 `did:key`, or None for any other DID."""
+    if not isinstance(did, str) or not did.startswith("did:key:z"):
+        return None
+    import base58
+    try:
+        raw = base58.b58decode(did[len("did:key:z"):])
+    except ValueError:
+        return None
+    # multicodec p256-pub (0x1200, varint 80 24) + 33-byte compressed point
+    return raw[3:] if raw[:2] == b"\x80\x24" and len(raw) == 35 else None
+
+
+def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None, bindings=(),
+               did_claim=None, subject=None):
     """Checks the quote itself; `bindings` carries the cross-evidence checks
     (runtime data, attestation key) computed by the caller.
+
+    KEY BINDING: when the credential declares `userData: {type: "key", value:
+    <DID>}`, the quote's extraData (TPM2 qualifying data) must be that DID's
+    P-256 public-key X coordinate -- the rule observed in every EQTY TPM quote.
+    It is checked only for the credential's own subject and a P-256 did:key;
+    otherwise no check is added and key binding stays "not checked".
 
     TRUST PATH: no TPM root is pinned, so the attestation key is NOT checked
     against Microsoft's vTPM CA. It is trusted only if it is bound to a
@@ -419,6 +439,15 @@ def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None,
             checks.append({"check": "bound_pcr_claim_to_quote", "passed": ok,
                            "detail": None if ok else "the PCR values the credential claims do not "
                                                      "hash to the digest the TPM signed"})
+    if did_claim is not None:
+        x = did_key_x(did_claim)
+        if did_claim != subject:
+            checks.append({"check": "key_bound_to_did", "passed": False,
+                           "detail": "the quote commits to %s, not to the credential's subject" % did_claim})
+        elif x is not None:
+            ok = bytes.fromhex(parsed["extra_data"]) == x
+            checks.append({"check": "key_bound_to_did", "passed": ok,
+                           "detail": None if ok else "the quote's extraData is not this DID's public key"})
     checks += list(bindings)
     return _summarize(checks, parsed, "tpm")
 
@@ -563,9 +592,12 @@ def verify_manifest_attestations(data, only_statement_id=None):
                             "detail": "the quote's %s blob is not in the manifest (or not valid base64)"
                                       % ("quoteSignature" if sig is None else "AKPublicKey")}
         else:
-            pcrs = ((cred.get("credentialSubject") or {}).get("identity") or {}).get("pcr")
+            subj = cred.get("credentialSubject") or {}
+            ident = subj.get("identity") or {}
+            pcrs, ud = ident.get("pcr"), ident.get("userData") or {}
             results[sid] = verify_tpm(quote, sig, ak, pcrs if isinstance(pcrs, dict) else None,
-                                      _tpm_bindings(m, P, data.get("statements", {}), cred, ak, results))
+                                      _tpm_bindings(m, P, data.get("statements", {}), cred, ak, results),
+                                      ud.get("value") if ud.get("type") == "key" else None, subj.get("id"))
         results[sid]["evidence_declared"] = types
     return results
 

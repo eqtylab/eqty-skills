@@ -34,11 +34,15 @@ verify_credentials (eqty_sdk verify_vc / verify_statement), parse_manifest's
 content check (eqty_sdk get_cid_for_bytes) and verify_attestation. The only
 logic of its own is the joins between them and two field comparisons.
 
-KNOWN GAP: key binding. Whether a hardware report's signed key material
-derives to the DID the attestation claims is not checked, because integrity-py
-exposes no primitive for it. It is printed as "not checked" on every evidence
-line and stated once below them. It does not affect the exit code: it is a
-property of this tool, not of the manifest under test.
+KEY BINDING: whether the hardware vouches for the DID the attestation claims.
+Checked through a TPM quote whose credential declares `userData.type: key`:
+the quote's extraData must be the DID's public key, and it counts only when
+the quote itself verified and is bound to a verified hardware report -- which
+then reads as bound too. Anything else is a KNOWN GAP, printed as "not checked"
+and stated once below the evidence lines: for bare Intel TDX, AMD SEV-SNP and
+NVIDIA reports the commitment rule lives in EQTY's vcomp code and integrity-py
+exposes no primitive for it. "Not checked" does not affect the exit code; a
+failed key binding does.
 """
 import os
 import sys
@@ -49,7 +53,8 @@ import parse_manifest as P  # noqa: E402
 import verify_credentials as V  # noqa: E402
 
 LIMIT = 10
-KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is not checked: the "
+KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is checked only through a "
+                   "TPM quote that carries the DID's key; where it reads not checked, the "
                    "commitment rule is defined in EQTY's vcomp code and integrity-py does not "
                    "expose it.")
 SEVERITY = {"failed": 0, "unchecked": 1, "missing": 2}
@@ -173,10 +178,15 @@ def _hardware(data, creds):
         # `bound_*`: claims and keys tied to other, already-verified evidence
         # (a TPM attestation key bound to a verified AMD report, say).
         bind = [x for x in checks if x["check"].startswith("bound_")]
-        sig = [x for x in checks if x not in chain and x not in bind]
+        keyb = [x for x in checks if x["check"] == "key_bound_to_did"]
+        sig = [x for x in checks if x not in chain and x not in bind and x not in keyb]
         sig_ok, sig_why = agg(sig)
         chain_ok, chain_why = agg(chain)
         bind_ok, bind_why = agg(bind)
+        key_ok, key_why = agg(keyb)
+        via_binding = bool(bind) and not chain and bind_ok is True
+        if key_ok is True and not (sig_ok is True and (chain_ok is True or via_binding)):
+            key_ok, key_why = None, "the evidence carrying the commitment did not itself verify"
         if not checks:                     # nothing could run: missing/invalid blob, no chain ...
             sig_why = chain_why = r.get("detail") or r.get("reason")
         items.append({"statement": sid, "label": label, "format": r.get("format"),
@@ -185,8 +195,19 @@ def _hardware(data, creds):
                       "has_binding": bool(bind), "binding": bind_ok, "binding_detail": bind_why,
                       # no vendor chain of its own, but its key is authenticated through
                       # a hardware report that verified against a pinned root
-                      "chain_via_binding": bool(bind) and not chain and bind_ok is True,
-                      "key_binding": None, "reason": r.get("reason")})
+                      "chain_via_binding": via_binding,
+                      "key_binding": key_ok, "key_binding_detail": key_why, "key_binding_via": None,
+                      "did": ((S.get(sid, {}).get("credential") or {}).get("credentialSubject") or {}).get("id"),
+                      "evidence": r.get("evidence_declared") or [], "reason": r.get("reason")})
+    # A TPM quote that binds the DID is itself bound to a verified hardware report
+    # of the same identity, so that report vouches for the DID through it.
+    # ponytail: matched by DID, not by the exact report the TPM bound through; one
+    # AMD/TDX report per identity in every manifest seen -- key on the report if not.
+    bound_dids = {i["did"] for i in items if i["key_binding"] is True and i["has_binding"]}
+    for i in items:
+        if (i["key_binding"] is None and i["did"] in bound_dids and i["signature"] is True
+                and i["chain"] is True and set(i["evidence"]) & set(A.TPM_BINDING_REPORTS)):
+            i["key_binding"], i["key_binding_via"] = True, "through the TPM quote"
     return {"status": "run", "items": items}
 
 
@@ -295,6 +316,8 @@ def verification_summary(data):
             issues.append(("unchecked", "Hardware binding not checked", "Hardware binding not checked for %s: %s" % (h["label"], h["binding_detail"])))
         elif h["chain"] is None and h["signature"] is not None and not h["has_binding"]:
             issues.append(("unchecked", "Vendor chain not checked", "Vendor certificate chain not checked for %s: %s" % (h["label"], h["chain_detail"])))
+        if h["key_binding"] is False:
+            issues.append(("failed", "Key binding failed", "Key binding failed for %s: %s" % (h["label"], h["key_binding_detail"])))
     links = _executed_on(data)
     for l in links:
         if not l["present"]:
@@ -432,9 +455,10 @@ def render_text(s, full=False):
             chain = ("not needed (its key is bound to a verified hardware report)"
                      if i["chain_via_binding"] else _state(i["chain"]))
             binding = " · hardware binding %s" % _state(i["binding"]) if i["has_binding"] else ""
-            L.append("- %s: report signature %s · vendor chain %s%s · key binding not checked"
-                     % (i["label"], _state(i["signature"]), chain, binding))
-        if h["items"]:
+            key = _state(i["key_binding"]) + (" (%s)" % i["key_binding_via"] if i["key_binding_via"] else "")
+            L.append("- %s: report signature %s · vendor chain %s%s · key binding %s"
+                     % (i["label"], _state(i["signature"]), chain, binding, key))
+        if any(i["key_binding"] is None for i in h["items"]):
             L.append("  " + KEY_BINDING_GAP)
     return "\n".join(L)
 

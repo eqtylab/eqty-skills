@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.3 — 2026-09-25
+
+- **eqty-manifest** — key binding is now checked through TPM quotes. When a TPM
+  credential declares `userData: {type: "key"}`, the quote's signed extraData must
+  be the DID's public key (its P-256 X coordinate). It reads *verified* only when
+  the quote verified and is bound to a verified AMD SEV-SNP or Intel TDX report,
+  and that report then reads bound to the DID through the quote; a mismatch
+  fails. Bare TDX, SEV-SNP and NVIDIA reports stay *not checked*.
+
 ## 0.1.2 — 2026-09-25
 
 - **eqty-manifest** — clearer in a sandbox such as Codex: point `UV_CACHE_DIR` at
