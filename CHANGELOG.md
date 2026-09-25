@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.4 — 2026-09-25
+
+- **eqty-manifest** — blobs referenced from an IdentityAttestation's `identity`
+  (a confidential VM's runtime data, cloud-init user data, kernel command line,
+  container configs, init data) are no longer reported as orphaned; when absent,
+  they now count as missing pre-images, which they are.
+
 ## 0.1.3 — 2026-09-25
 
 - **eqty-manifest** — key binding is now checked through TPM quotes. When a TPM

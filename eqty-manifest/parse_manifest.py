@@ -516,9 +516,16 @@ class Manifest:
             # (a STATEMENT id) and `@context` CIDs, neither of which is a
             # blob — and every one of those would then be misreported as a
             # missing blob.
+            # The same holds for an IdentityAttestation's `identity`: its
+            # runtime data (`userData.source`), cloud-init user data, kernel
+            # command line, container configs and init data are blobs the
+            # attestation describes. `identity` never holds a statement id.
             cred = s.get("credential")
             if isinstance(cred, dict) and "evidence" in cred:
                 _collect_cids(cred["evidence"], referenced)
+            subj = cred.get("credentialSubject") if isinstance(cred, dict) else None
+            if isinstance(subj, dict) and isinstance(subj.get("identity"), (dict, list)):
+                _collect_cids(subj["identity"], referenced)
             if isinstance(s.get("vcomp"), (dict, list)):
                 _collect_cids(s["vcomp"], referenced)
         return referenced

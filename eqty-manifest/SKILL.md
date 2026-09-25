@@ -250,8 +250,11 @@ not open them.
 - **Field shapes vary.** `input`/`output` can be one CID or a list. Never
   iterate a field without normalising it first (`as_list()`).
 - **"Not named by a statement" is not "unused".** A blob can be reachable only
-  through another blob (an iroh collection's HashSeq, or a credential's
-  `evidence`). Trust `orphans` only after that resolution, which the scripts do.
+  through another blob (an iroh collection's HashSeq), or only through a
+  credential's `evidence` or an attestation's `identity` (runtime data,
+  cloud-init, container configs). Trust `orphans` only after that resolution,
+  which the scripts do. What remains is unreferenced, not wrong: say what it is
+  (a TPM event log nothing links, say) rather than calling it an error.
 - **Not every blob is JSON text.** Blobs can be binary, an iroh collection
   listing, or invalid base64. Report each as what it is; never print mangled
   text or guess at what a corrupt blob said.
