@@ -55,9 +55,12 @@ directory.
   otherwise `pip install -r eqty-manifest/requirements.txt`. Without them the
   scripts still parse and report, and every check they cannot run says
   *not checked* — never a pass.
-- **`eqty-instrument`**'s own scripts (`detect.py`, `check_graph.py`) use the
-  standard library only. The patch it writes adds `eqty-sdk` to *your* repo's
-  dependencies.
+- **`eqty-instrument`** needs nothing installed to run: its scripts
+  (`detect.py`, `check_graph.py`) use the standard library only. What it
+  produces is a patch to *your* code, and that patch adds `eqty-sdk` to your
+  project's dependencies, because the instrumented code imports it. In Mode 1
+  the patch also adds EQTY's LangChain or DeepAgents handler package, installed
+  from EQTY's private package index (see [`LIMITATIONS.md`](LIMITATIONS.md)).
 
 Both skills build on the open-source EQTY SDK (`eqty_sdk`):
 [eqtylab/integrity-py](https://github.com/eqtylab/integrity-py), installed with
