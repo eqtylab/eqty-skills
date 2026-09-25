@@ -1,0 +1,25 @@
+EQTY Skills
+Copyright 2026 EQTY Lab
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It includes third-party material, each under its own license, kept beside it:
+
+- eqty-instrument/references/upstream/ and eqty-instrument/examples/mode1/
+  Derived from eqtylab/eqty-lineage (commit 35b65dae), Copyright 2026 EQTY Lab,
+  Apache License 2.0. The files in references/upstream/ are copied verbatim;
+  those in examples/mode1/ are the upstream examples with EQTY instrumentation
+  removed (*_before.py) and re-added by this skill (*_after.py).
+  License: eqty-instrument/references/upstream/LICENSE,
+           eqty-instrument/examples/mode1/LICENSE
+
+- eqty-instrument/examples/mode2/pygit/
+  Derived from benhoyt/pygit (commit aa8d8bb6), Copyright (c) 2017 Ben Hoyt,
+  MIT License.
+  License: eqty-instrument/examples/mode2/pygit/LICENSE.txt
+
+- eqty-instrument/examples/mode2/llama/
+  Derived from meta-llama/llama (commit 689c7f26).
+  Llama 2 is licensed under the LLAMA 2 Community License, Copyright (c) Meta
+  Platforms, Inc. All Rights Reserved.
+  License: eqty-instrument/examples/mode2/llama/LICENSE
+  Acceptable Use Policy: eqty-instrument/examples/mode2/llama/USE_POLICY.md

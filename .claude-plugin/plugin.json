@@ -1,0 +1,9 @@
+{
+  "name": "eqty-skills",
+  "version": "0.1.0",
+  "description": "eqty-manifest reads, verifies and reports on EQTY lineage manifests; eqty-instrument makes a repo emit one.",
+  "author": { "name": "EQTY Lab" },
+  "license": "Apache-2.0",
+  "keywords": ["eqty", "lineage", "provenance", "manifest", "verification", "langchain", "langgraph", "deepagents"],
+  "skills": ["./eqty-instrument", "./eqty-manifest"]
+}

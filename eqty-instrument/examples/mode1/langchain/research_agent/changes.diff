@@ -1,0 +1,65 @@
+--- research_agent_before.py
++++ research_agent_after.py
+@@ -11,8 +11,11 @@
+ 
+ import argparse
+ import os
++from pathlib import Path
+ from typing import Annotated, TypedDict
+ 
++from eqty_lineage.langchain import EqtyCallbackHandler, eqty_tool
++from eqty_sdk import Context, Signer, init, set_active_signer
+ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+ from langchain_core.tools import tool
+ from langchain_openai import ChatOpenAI
+@@ -20,6 +23,8 @@
+ from langgraph.graph.message import add_messages
+ from langgraph.prebuilt import ToolNode
+ 
++MANIFEST_PATH = Path("./manifests/research_agent.json")
++
+ KNOWLEDGE_BASE = {
+     "cid": (
+         "A CID (content identifier) is a self-describing hash that uniquely and "
+@@ -44,6 +49,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def search_knowledge_base(query: str) -> str:
+     """Search the local knowledge base for entries matching the query."""
+     query_words = {w.strip("?.,!").lower() for w in query.split()}
+@@ -58,6 +64,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def calculate(expression: str) -> str:
+     """Evaluate a basic arithmetic expression, e.g. '3 * 32'."""
+     allowed = set("0123456789+-*/(). ")
+@@ -127,13 +134,24 @@
+ 
+ def main() -> None:
+     args = parse_args()
++
++    # Process startup: init() is process-global and a second call is a silent
++    # no-op, so it happens exactly once, here -- never per run.
++    cfg = init(default_context=Context.new("Research Agent")).set_store_all_blobs(True)
++    set_active_signer(Signer.load_or_create(name="research_agent"))
++
+     app = build_graph()
+     result = app.invoke(
+         {"messages": [HumanMessage(args.question)], "question": args.question, "answer": ""},
+-        config={"recursion_limit": 25},
++        # merged into the existing config: recursion_limit is preserved.
++        # One handler per invocation, constructed here at the call site.
++        config={"recursion_limit": 25, "callbacks": [EqtyCallbackHandler()]},
+     )
+     print(result["answer"])
+ 
++    cfg.get_default_context().export(MANIFEST_PATH)
++    print(f"EQTY manifest: {MANIFEST_PATH}")
+ 
++
+ if __name__ == "__main__":
+     main()

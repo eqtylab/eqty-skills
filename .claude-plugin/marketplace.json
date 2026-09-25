@@ -1,0 +1,12 @@
+{
+  "name": "eqty-lab",
+  "owner": { "name": "EQTY Lab" },
+  "description": "EQTY lineage skills: read and verify manifests, and instrument code to emit them.",
+  "plugins": [
+    {
+      "name": "eqty-skills",
+      "source": "./",
+      "description": "eqty-manifest (read, verify, report on an EQTY lineage manifest) and eqty-instrument (make a repo emit one)."
+    }
+  ]
+}

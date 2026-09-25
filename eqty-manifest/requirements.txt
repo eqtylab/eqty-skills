@@ -1,0 +1,12 @@
+# eqty-manifest runtime dependencies -- the fallback for machines without uv.
+# With uv, just `uv run <script>`: each script declares these itself (PEP 723).
+# Without uv:
+#   pip install -r requirements.txt
+# Tested with eqty-sdk 2.4.2, cryptography 50.0.1, base58 2.1.1.
+
+# Signatures (verify_vc / verify_statement) and blob hashing (get_cid_for_bytes).
+eqty-sdk>=2.4.1
+# Hardware attestation evidence (Intel TDX, AMD SEV-SNP, NVIDIA CC) and Sigstore bundles.
+cryptography
+# did:key decoding for Sigstore bundles.
+base58

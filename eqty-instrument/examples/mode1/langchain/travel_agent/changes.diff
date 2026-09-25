@@ -1,0 +1,78 @@
+--- travel_agent_before.py
++++ travel_agent_after.py
+@@ -18,8 +18,11 @@
+ 
+ import argparse
+ import os
++from pathlib import Path
+ from typing import Annotated, TypedDict
+ 
++from eqty_lineage.langchain import EqtyCallbackHandler, eqty_tool
++from eqty_sdk import Context, Signer, init, set_active_signer
+ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+ from langchain_core.tools import tool
+ from langchain_openai import ChatOpenAI
+@@ -54,6 +57,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def get_weather(city: str) -> str:
+     """Get the current weather for a city."""
+     conditions = WEATHER.get(city.strip().lower())
+@@ -63,6 +67,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def list_attractions(city: str) -> str:
+     """List the top attractions for a city."""
+     sights = ATTRACTIONS.get(city.strip().lower())
+@@ -72,6 +77,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def get_exchange_rate(from_currency: str, to_currency: str) -> str:
+     """Get the exchange rate between two currencies, e.g. from_currency='USD', to_currency='EUR'."""
+     pair = (from_currency.strip().lower(), to_currency.strip().lower())
+@@ -83,6 +89,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def calculate(expression: str) -> str:
+     """Evaluate a basic arithmetic expression, e.g. '1500 * 0.92'."""
+     allowed = set("0123456789+-*/(). ")
+@@ -150,15 +157,30 @@
+     return parser.parse_args()
+ 
+ 
++MANIFEST_PATH = Path("./manifests/travel_agent.json")
++
++
+ def main() -> None:
+     args = parse_args()
++
++    # EQTY lineage: init() is process-global, so it happens once here at startup,
++    # never per run. A second call is a silent no-op.
++    cfg = init(default_context=Context.new("Travel Agent")).set_store_all_blobs(True)
++    set_active_signer(Signer.load_or_create(name="travel_agent"))
++
+     app = build_graph()
+     result = app.invoke(
+         {"messages": [HumanMessage(args.question)], "question": args.question, "answer": ""},
+-        config={"recursion_limit": 25},
++        # One handler per invocation, built here at the call site; the existing
++        # config keys are merged, not replaced.
++        config={"recursion_limit": 25, "callbacks": [EqtyCallbackHandler()]},
+     )
+     print(result["answer"])
+ 
++    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
++    cfg.get_default_context().export(MANIFEST_PATH)
++    print(f"EQTY manifest: {MANIFEST_PATH}")
+ 
++
+ if __name__ == "__main__":
+     main()

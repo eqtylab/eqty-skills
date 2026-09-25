@@ -1,0 +1,161 @@
+--- travel_agent_before.py
++++ travel_agent_after.py
+@@ -14,12 +14,18 @@
+ Requires OPENAI_API_KEY.
+ 
+     uv run python examples/langchain/travel_agent.py "your question"
++
++Each run emits an EQTY lineage manifest to ``manifests/travel_agent.json`` (relative to the
++working directory, alongside the ``.eqty_sdk`` store ``init()`` creates there).
+ """
+ 
+ import argparse
+ import os
++from pathlib import Path
+ from typing import Annotated, TypedDict
+ 
++from eqty_lineage.langchain import EqtyCallbackHandler, eqty_tool
++from eqty_sdk import Context, Signer, init, set_active_signer
+ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+ from langchain_core.tools import tool
+ from langchain_openai import ChatOpenAI
+@@ -27,6 +33,8 @@
+ from langgraph.graph.message import add_messages
+ from langgraph.prebuilt import ToolNode
+ 
++MANIFEST_PATH = Path("manifests/travel_agent.json")
++
+ WEATHER = {
+     "amsterdam": "14°C, light rain, wind 20 km/h",
+     "lisbon": "24°C, sunny, wind 10 km/h",
+@@ -54,6 +62,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def get_weather(city: str) -> str:
+     """Get the current weather for a city."""
+     conditions = WEATHER.get(city.strip().lower())
+@@ -63,6 +72,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def list_attractions(city: str) -> str:
+     """List the top attractions for a city."""
+     sights = ATTRACTIONS.get(city.strip().lower())
+@@ -72,6 +82,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def get_exchange_rate(from_currency: str, to_currency: str) -> str:
+     """Get the exchange rate between two currencies, e.g. from_currency='USD', to_currency='EUR'."""
+     pair = (from_currency.strip().lower(), to_currency.strip().lower())
+@@ -83,6 +94,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def calculate(expression: str) -> str:
+     """Evaluate a basic arithmetic expression, e.g. '1500 * 0.92'."""
+     allowed = set("0123456789+-*/(). ")
+@@ -152,12 +164,19 @@
+ 
+ def main() -> None:
+     args = parse_args()
++    # init() is process-global and a second call is a silent no-op, so it happens exactly
++    # once, here at process startup.
++    cfg = init(default_context=Context.new("Travel Agent")).set_store_all_blobs(True)
++    set_active_signer(Signer.load_or_create(name="travel_agent"))
+     app = build_graph()
+     result = app.invoke(
+         {"messages": [HumanMessage(args.question)], "question": args.question, "answer": ""},
+-        config={"recursion_limit": 25},
++        # One handler, built here at the call site, for this one run.
++        config={"recursion_limit": 25, "callbacks": [EqtyCallbackHandler()]},
+     )
+     print(result["answer"])
++    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
++    cfg.get_default_context().export(MANIFEST_PATH)
+ 
+ 
+ if __name__ == "__main__":
+--- travel_chat_ui_before.py
++++ travel_chat_ui_after.py
+@@ -4,6 +4,10 @@
+ ``thread_id``, so a conversation resumes from the checkpointer across turns.
+ 
+     uv run python examples/langchain/travel_chat_ui.py
++
++The server emits an EQTY lineage manifest for the whole process to
++``manifests/travel_chat_ui.json`` (relative to the working directory, alongside the
++``.eqty_sdk`` store ``init()`` creates there) when it shuts down.
+ """
+ 
+ import argparse
+@@ -13,11 +17,14 @@
+ import time
+ from http import HTTPStatus
+ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
++from pathlib import Path
+ from threading import Lock
+ from typing import Any
+ from uuid import UUID
+ import webbrowser
+ 
++from eqty_lineage.langchain import EqtyCallbackHandler
++from eqty_sdk import Context, Signer, init, set_active_signer
+ from langchain_core.messages import HumanMessage
+ from langgraph.checkpoint.memory import MemorySaver
+ 
+@@ -28,6 +35,11 @@
+ # HTTP requests may arrive concurrently; serialize graph invocation so turns of different threads
+ # cannot interleave inside the shared checkpointer.
+ invoke_lock = Lock()
++MANIFEST_PATH = Path("manifests/travel_chat_ui.json")
++# One lineage handler per conversation, keyed like the checkpointer is: reusing a session's
++# handler across its turns is what chains turn 1 to turn 3. Read and written only under
++# invoke_lock, which is also what keeps two runs from ever sharing one handler in flight.
++lineage_handlers: dict[str, EqtyCallbackHandler] = {}
+ 
+ 
+ PAGE = """<!doctype html>
+@@ -117,12 +129,16 @@
+             logger.info("chat.started session_id=%s input_chars=%d", session_id, len(message))
+ 
+             with invoke_lock:
++                handler = lineage_handlers.get(session_id)
++                if handler is None:
++                    handler = lineage_handlers[session_id] = EqtyCallbackHandler()
+                 result = self.app.invoke(
+                     {"messages": [HumanMessage(message)], "question": message, "answer": ""},
+                     config={
+                         "configurable": {"thread_id": session_id},
+                         "run_name": "Travel Assistant",
+                         "recursion_limit": 25,
++                        "callbacks": [handler],
+                     },
+                 )
+             answer = str(result["answer"])
+@@ -160,6 +176,10 @@
+     )
+     for logger_name in ("httpx", "httpcore", "urllib3", "openai", "hyper", "hyper_util"):
+         logging.getLogger(logger_name).setLevel(logging.WARNING)
++    # init() is process-global and a second call is a silent no-op, so it happens exactly
++    # once, here at process startup rather than per chat turn.
++    cfg = init(default_context=Context.new("Travel Chat UI")).set_store_all_blobs(True)
++    set_active_signer(Signer.load_or_create(name="travel_chat_ui"))
+     TravelChatHandler.app = build_graph(checkpointer=MemorySaver())
+     server = ThreadingHTTPServer((args.host, args.port), TravelChatHandler)
+     url = f"http://{args.host}:{args.port}"
+@@ -172,6 +192,9 @@
+         print("\nStopping server.")
+     finally:
+         server.server_close()
++        MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
++        cfg.get_default_context().export(MANIFEST_PATH)
++        logger.info("lineage.exported path=%s", MANIFEST_PATH)
+ 
+ 
+ if __name__ == "__main__":

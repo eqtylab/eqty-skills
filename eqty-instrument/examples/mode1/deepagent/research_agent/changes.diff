@@ -1,0 +1,93 @@
+--- research_agent_before.py
++++ research_agent_after.py
+@@ -14,19 +14,26 @@
+ it comes from ``langchain``, and a stock ``create_deep_agent`` has neither ``write_todos`` nor the
+ ``todos`` state key.
+ 
+-Prints the agent's answer and a short summary of what the run produced.
++Prints the agent's answer and a short summary of what the run produced, and exports an EQTY
++lineage manifest of the run to ``manifests/research_agent.json``.
+ """
+ 
+ import argparse
+ import os
++from pathlib import Path
+ from typing import Any, Dict, List
+ 
+ from deepagents import create_deep_agent
++from eqty_lineage.deepagents import EqtyDeepAgentsHandler, eqty_tool
++from eqty_sdk import Context, Signer, init, set_active_signer
+ from langchain.agents.middleware import TodoListMiddleware
+ from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+ from langchain_core.messages import AIMessage, HumanMessage
+ from langchain_core.tools import tool
+ 
++# Written relative to the working directory, next to the ``.eqty_sdk`` store ``init()`` creates.
++MANIFEST_PATH = Path("manifests/research_agent.json")
++
+ SYSTEM_PROMPT = (
+     "You are a research assistant. Plan with write_todos, delegate lookups to the librarian subagent, "
+     "keep your notes and drafts in files, and finish with a short report in /report.md."
+@@ -51,6 +58,7 @@
+ 
+ 
+ @tool
++@eqty_tool
+ def search_knowledge_base(query: str) -> str:
+     """Search the local knowledge base for entries matching the query."""
+     words = {w.strip("?.,!").lower() for w in query.split()}
+@@ -131,7 +139,7 @@
+     else:
+         model = ScriptedModel(messages=iter(SCRIPT))
+ 
+-    return create_deep_agent(
++    agent = create_deep_agent(
+         model=model,
+         tools=[search_knowledge_base],
+         system_prompt=SYSTEM_PROMPT,
+@@ -140,7 +148,16 @@
+         name="research-agent",
+     )
+ 
++    # DeepAgents' built-in belt (write_file, edit_file, task, ...) is built by middleware and is
++    # not ours to decorate, so content-address the live tool objects the compiled graph assembled.
++    # A graph without a "tools" node degrades to the name/description stub rather than raising.
++    tools_node = getattr(agent.nodes.get("tools"), "bound", None)
++    for tool_obj in (getattr(tools_node, "tools_by_name", None) or {}).values():
++        eqty_tool(tool_obj)
+ 
++    return agent
++
++
+ def summarize(result: Dict[str, Any]) -> str:
+     files = sorted(result.get("files") or {})
+     todos = result.get("todos") or []
+@@ -163,16 +180,27 @@
+ 
+ def main() -> None:
+     args = parse_args()
++
++    # init() is process-global: once at process startup, never per run. A second call is a
++    # silent no-op that leaves the first store in place.
++    cfg = init(default_context=Context.new("Deep Research")).set_store_all_blobs(True)
++    set_active_signer(Signer.load_or_create(name="deep_research"))
++
+     agent = build_agent(args.live)
+ 
+     result = agent.invoke(
+         {"messages": [HumanMessage(args.question)]},
+-        config={"recursion_limit": 80},
++        # One handler per invocation, built here at the call site; merged into the existing config.
++        config={"recursion_limit": 80, "callbacks": [EqtyDeepAgentsHandler()]},
+     )
+ 
++    MANIFEST_PATH.parent.mkdir(parents=True, exist_ok=True)
++    cfg.get_default_context().export(MANIFEST_PATH)
++
+     print(result["messages"][-1].content)
+     print()
+     print(summarize(result))
++    print(f"manifest:         {MANIFEST_PATH}")
+ 
+ 
+ if __name__ == "__main__":

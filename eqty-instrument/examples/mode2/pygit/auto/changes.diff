@@ -1,0 +1,377 @@
+--- pygit_before.py
++++ pygit_after.py
+@@ -7,8 +7,11 @@
+ 
+ import argparse, collections, difflib, enum, hashlib, operator, os, stat
+ import struct, sys, time, urllib.request, zlib
++import inspect
+ 
++import eqty_sdk
+ 
++
+ # Data for one entry in the git index (.git/index)
+ IndexEntry = collections.namedtuple('IndexEntry', [
+     'ctime_s', 'ctime_n', 'mtime_s', 'mtime_n', 'dev', 'ino', 'mode', 'uid',
+@@ -249,10 +252,28 @@
+ def add(paths):
+     """Add all file paths to git index."""
+     paths = [p.replace('\\', '/') for p in paths]
++    lineage = eqty_sdk.Computation.new(
++            name='add', computation_type='transform',
++            description='stage working-copy files: write a blob object for '
++                        'each file and rewrite .git/index',
++            _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(add), name='add', _store=True).cid)
+     all_entries = read_index()
++    if os.path.exists(os.path.join('.git', 'index')):
++        # read_index() just read the existing index
++        lineage.add_input_cid(eqty_sdk.Database.from_path(
++                os.path.join('.git', 'index'), name='.git/index',
++                _store=True).cid)
+     entries = [e for e in all_entries if e.path not in paths]
+     for path in paths:
+-        sha1 = hash_object(read_file(path), 'blob')
++        data = read_file(path)
++        lineage.add_input_cid(eqty_sdk.Dataset.from_cid(
++                eqty_sdk.get_cid_for_bytes(data, True), name=path).cid)
++        sha1 = hash_object(data, 'blob')
++        object_path = os.path.join('.git', 'objects', sha1[:2], sha1[2:])
++        lineage.add_output_cid(eqty_sdk.Binary.from_path(
++                object_path, name=object_path, _store=True).cid)
+         st = os.stat(path)
+         flags = len(path.encode())
+         assert flags < (1 << 12)
+@@ -263,6 +284,9 @@
+         entries.append(entry)
+     entries.sort(key=operator.attrgetter('path'))
+     write_index(entries)
++    lineage.add_output_cid(eqty_sdk.Database.from_path(
++            os.path.join('.git', 'index'), name='.git/index', _store=True).cid)
++    lineage.finalize()
+ 
+ 
+ def write_tree():
+@@ -291,7 +315,29 @@
+     Return hash of commit object.
+     """
+     tree = write_tree()
++    lineage = eqty_sdk.Computation.new(
++            name='commit', computation_type='emit',
++            description='write the index as a tree object, write a commit '
++                        'object over it, and point master at the commit',
++            _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(commit), name='commit', _store=True).cid)
++    lineage.add_input_cid(eqty_sdk.Document.from_object(
++            message, name='commit message', _store=True).cid)
++    if os.path.exists(os.path.join('.git', 'index')):
++        # write_tree() just read the index that add() wrote
++        lineage.add_input_cid(eqty_sdk.Database.from_path(
++                os.path.join('.git', 'index'), name='.git/index',
++                _store=True).cid)
++    tree_path = os.path.join('.git', 'objects', tree[:2], tree[2:])
++    lineage.add_output_cid(eqty_sdk.Binary.from_path(
++            tree_path, name=tree_path, _store=True).cid)
+     parent = get_local_master_hash()
++    if parent is not None:
++        # get_local_master_hash() just read the ref this commit will move
++        lineage.add_input_cid(eqty_sdk.Document.from_path(
++                os.path.join('.git', 'refs', 'heads', 'master'),
++                name='.git/refs/heads/master', _store=True).cid)
+     if author is None:
+         author = '{} <{}>'.format(
+                 os.environ['GIT_AUTHOR_NAME'], os.environ['GIT_AUTHOR_EMAIL'])
+@@ -314,6 +360,12 @@
+     sha1 = hash_object(data, 'commit')
+     master_path = os.path.join('.git', 'refs', 'heads', 'master')
+     write_file(master_path, (sha1 + '\n').encode())
++    commit_path = os.path.join('.git', 'objects', sha1[:2], sha1[2:])
++    lineage.add_output_cid(eqty_sdk.Binary.from_path(
++            commit_path, name=commit_path, _store=True).cid)
++    lineage.add_output_cid(eqty_sdk.Document.from_path(
++            master_path, name='.git/refs/heads/master', _store=True).cid)
++    lineage.finalize()
+     print('committed to master: {:7}'.format(sha1))
+     return sha1
+ 
+@@ -364,6 +416,20 @@
+     """
+     url = git_url + '/info/refs?service=git-receive-pack'
+     response = http_request(url, username, password)
++    lineage = eqty_sdk.Computation.new(
++            name='get_remote_master_hash', computation_type='ingest',
++            description="fetch the remote's ref advertisement to learn "
++                        'which commit its master points at',
++            _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(get_remote_master_hash),
++            name='get_remote_master_hash', _store=True).cid)
++    lineage.add_input_cid(eqty_sdk.Configuration.from_object(
++            git_url, name='remote URL', _store=True).cid)
++    lineage.add_output_cid(eqty_sdk.Document.from_cid(
++            eqty_sdk.get_cid_for_bytes(response, True),
++            name='info/refs advertisement').cid)
++    lineage.finalize()
+     lines = extract_lines(response)
+     assert lines[0] == b'# service=git-receive-pack\n'
+     assert lines[1] == b''
+@@ -432,9 +498,32 @@
+     at the remote (based on the given remote commit hash).
+     """
+     local_objects = find_commit_objects(local_sha1)
++    lineage = eqty_sdk.Computation.new(
++            name='find_missing_objects', computation_type='decide',
++            description='walk the local commit and choose the objects the '
++                        'remote does not have',
++            _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(find_missing_objects),
++            name='find_missing_objects', _store=True).cid)
++    # find_commit_objects() starts its walk by reading this commit object
++    local_path = find_object(local_sha1)
++    lineage.add_input_cid(eqty_sdk.Binary.from_path(
++            local_path, name=local_path, _store=True).cid)
+     if remote_sha1 is None:
++        lineage.add_output_cid(eqty_sdk.Document.from_object(
++                sorted(local_objects), name='missing objects',
++                _store=True).cid)
++        lineage.finalize()
+         return local_objects
+     remote_objects = find_commit_objects(remote_sha1)
++    remote_path = find_object(remote_sha1)
++    lineage.add_input_cid(eqty_sdk.Binary.from_path(
++            remote_path, name=remote_path, _store=True).cid)
++    lineage.add_output_cid(eqty_sdk.Document.from_object(
++            sorted(local_objects - remote_objects), name='missing objects',
++            _store=True).cid)
++    lineage.finalize()
+     return local_objects - remote_objects
+ 
+ 
+@@ -465,6 +554,23 @@
+     contents = header + body
+     sha1 = hashlib.sha1(contents).digest()
+     data = contents + sha1
++    lineage = eqty_sdk.Computation.new(
++            name='create_pack', computation_type='aggregate',
++            description='pack the chosen objects into one packfile',
++            object_count=len(objects), _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(create_pack), name='create_pack',
++            _store=True).cid)
++    lineage.add_input_cid(eqty_sdk.Document.from_object(
++            sorted(objects), name='missing objects', _store=True).cid)
++    for obj in sorted(objects):
++        # encode_pack_object() read this object file into the pack
++        object_path = find_object(obj)
++        lineage.add_input_cid(eqty_sdk.Binary.from_path(
++                object_path, name=object_path, _store=True).cid)
++    lineage.add_output_cid(eqty_sdk.Binary.from_cid(
++            eqty_sdk.get_cid_for_bytes(data, True), name='packfile').cid)
++    lineage.finalize()
+     return data
+ 
+ 
+@@ -482,9 +588,29 @@
+             '' if len(missing) == 1 else 's'))
+     lines = ['{} {} refs/heads/master\x00 report-status'.format(
+             remote_sha1 or ('0' * 40), local_sha1).encode()]
+-    data = build_lines_data(lines) + create_pack(missing)
++    ref_update = build_lines_data(lines)
++    pack = create_pack(missing)
++    data = ref_update + pack
+     url = git_url + '/git-receive-pack'
+     response = http_request(url, username, password, data=data)
++    lineage = eqty_sdk.Computation.new(
++            name='push', computation_type='emit',
++            description='POST the ref update and the packfile to the '
++                        "remote's git-receive-pack",
++            _store=True)
++    lineage.add_input_cid(eqty_sdk.Code.from_object(
++            inspect.getsource(push), name='push', _store=True).cid)
++    lineage.add_input_cid(eqty_sdk.Configuration.from_object(
++            git_url, name='remote URL', _store=True).cid)
++    lineage.add_input_cid(eqty_sdk.Document.from_cid(
++            eqty_sdk.get_cid_for_bytes(ref_update, True),
++            name='ref update').cid)
++    lineage.add_input_cid(eqty_sdk.Binary.from_cid(
++            eqty_sdk.get_cid_for_bytes(pack, True), name='packfile').cid)
++    lineage.add_output_cid(eqty_sdk.Document.from_cid(
++            eqty_sdk.get_cid_for_bytes(response, True),
++            name='receive-pack response').cid)
++    lineage.finalize()
+     lines = extract_lines(response)
+     assert len(lines) >= 2, \
+         'expected at least 2 lines, got {}'.format(len(lines))
+@@ -564,6 +690,14 @@
+             help='show status of working copy')
+ 
+     args = parser.parse_args()
++    if args.command in ['add', 'commit', 'push']:
++        # These commands run recorded steps. The SDK directory, and the
++        # signing key in it, live inside .git, outside the tracked files.
++        eqty_config = eqty_sdk.init(
++                default_context=eqty_sdk.Context.new('pygit ' + args.command),
++                custom_dir=os.path.join('.git', 'eqty_sdk'))
++        eqty_config.set_store_all_blobs(True)
++        eqty_sdk.set_active_signer(eqty_sdk.Signer.load_or_create(name='pygit'))
+     if args.command == 'add':
+         add(args.paths)
+     elif args.command == 'cat-file':
+--- /dev/null
++++ run_example_after.py
+@@ -0,0 +1,153 @@
++#!/usr/bin/env python3
++"""Run the instrumented pygit against a stub git server and export a manifest.
++
++Scaffolding, not part of pygit: this file is not in the pristine target, so it
++carries no lineage nodes of its own. It initialises the SDK, drives pygit's own
++entry points in the command sequence the CFG was pinned to --
++
++    init -> add -> commit -> push
++
++-- and exports the context pygit's own code filled in. Every node in the
++manifest comes from pygit.py.
++
++It calls pygit with the argument types pygit's own CLI uses: a list of path
++strings for add(), a message string (author by keyword) for commit(), a URL
++string (credentials by keyword) for push(). It builds no assets.
++
++This is the **auto** run: the node set is `mode2/outputs/pygit/pygit.auto.nodes.md`,
++placed as described in `pygit.auto.placement.md`.
++
++WHAT IS STUBBED
++---------------
++The remote. `_ReceivePackHandler` below is ~40 lines of the smart-HTTP
++receive-pack protocol: it answers `info/refs` with an empty repository and
++answers the POST with `unpack ok` / `ok refs/heads/master`. Nothing else is
++faked -- the objects, the index, the commit, the pack and the pkt-line framing
++are all produced by pygit.
++
++**The manifest is therefore not a claim that a real git server accepted this
++push.** The stub also fixes the remote as empty, so find_missing_objects runs
++its remote_sha1-is-None branch. The info/refs advertisement and the
++receive-pack response recorded by get_remote_master_hash and push are the
++stub's bytes, not a real server's.
++
++pygit's own command line records its runs too (into .git/eqty_sdk of the
++repository it runs in); this script is only needed to get one exported
++manifest covering init -> add -> commit -> push in a single context.
++
++    python3 run_example.py [--manifest PATH] [--store DIR] [--keep]
++"""
++
++from __future__ import annotations
++
++import argparse
++import http.server
++import os
++import shutil
++import sys
++import tempfile
++import threading
++from pathlib import Path
++
++import eqty_sdk as sdk
++
++HERE = Path(__file__).resolve().parent
++# A new path: the earlier run's outputs/pygit/pygit.auto.manifest.json is kept as it is.
++DEFAULT_MANIFEST = HERE.parents[1] / "outputs" / "pygit" / "pygit.auto.manifest.json"
++
++ZERO = b"0" * 40
++
++
++def pkt(payload: bytes) -> bytes:
++    """One pkt-line: a 4-hex-digit length prefix covering itself."""
++    return ("%04x" % (len(payload) + 4)).encode() + payload
++
++
++FLUSH = b"0000"
++
++INFO_REFS = (
++    pkt(b"# service=git-receive-pack\n")
++    + FLUSH
++    + pkt(ZERO + b" capabilities^{}\x00report-status\n")
++    + FLUSH
++)
++RECEIVE_PACK_OK = pkt(b"unpack ok\n") + pkt(b"ok refs/heads/master\n") + FLUSH
++
++
++class _ReceivePackHandler(http.server.BaseHTTPRequestHandler):
++    """The stubbed boundary: just enough git smart-HTTP to complete a push."""
++
++    posted: list[bytes] = []
++
++    def _send(self, body: bytes, content_type: str) -> None:
++        self.send_response(200)
++        self.send_header("Content-Type", content_type)
++        self.send_header("Content-Length", str(len(body)))
++        self.end_headers()
++        self.wfile.write(body)
++
++    def do_GET(self):  # noqa: N802 - http.server's spelling
++        if "service=git-receive-pack" not in self.path:
++            self.send_error(404)
++            return
++        self._send(INFO_REFS, "application/x-git-receive-pack-advertisement")
++
++    def do_POST(self):  # noqa: N802
++        length = int(self.headers.get("Content-Length", 0))
++        _ReceivePackHandler.posted.append(self.rfile.read(length))
++        self._send(RECEIVE_PACK_OK, "application/x-git-receive-pack-result")
++
++    def log_message(self, *args):
++        pass
++
++
++def main() -> int:
++    parser = argparse.ArgumentParser(description=__doc__)
++    parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
++    parser.add_argument("--store", type=Path, default=HERE / ".eqty_sdk")
++    parser.add_argument("--keep", action="store_true",
++                        help="leave the scratch repository on disk")
++    args = parser.parse_args()
++
++    sys.path.insert(0, str(HERE))
++    import pygit
++
++    # One identity, one context, for this process. store_all_blobs keeps every
++    # preimage in the manifest, so a reader can open what was committed to.
++    config = sdk.init(default_context=sdk.Context.new("pygit push"),
++                      custom_dir=str(args.store))
++    config.set_store_all_blobs(True)
++    sdk.set_active_signer(sdk.Signer.load_or_create(name="pygit_auto"))
++
++    server = http.server.HTTPServer(("127.0.0.1", 0), _ReceivePackHandler)
++    threading.Thread(target=server.serve_forever, daemon=True).start()
++    git_url = "http://127.0.0.1:{}/example.git".format(server.server_address[1])
++
++    workdir = Path(tempfile.mkdtemp(prefix="pygit-auto-"))
++    cwd = Path.cwd()
++    try:
++        os.chdir(workdir)
++        pygit.init("repo")
++        os.chdir(workdir / "repo")
++
++        pygit.write_file("README.md", b"# example\n\nA repository with two files.\n")
++        pygit.write_file("hello.txt", b"hello from pygit\n")
++
++        # Same calls, same argument types, as pygit's own CLI makes.
++        pygit.add(["README.md", "hello.txt"])
++        pygit.commit("first commit", author="Example <example@example.com>")
++        pygit.push(git_url, username="example", password="not-a-real-token")
++    finally:
++        os.chdir(cwd)
++        server.shutdown()
++        if not args.keep:
++            shutil.rmtree(workdir, ignore_errors=True)
++
++    args.manifest.parent.mkdir(parents=True, exist_ok=True)
++    config.get_default_context().export(args.manifest)
++    print("wrote {}".format(args.manifest))
++    return 0
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())

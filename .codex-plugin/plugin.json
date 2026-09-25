@@ -1,0 +1,35 @@
+{
+  "name": "eqty-skills",
+  "version": "0.1.0",
+  "description": "eqty-manifest reads, verifies and reports on EQTY lineage manifests; eqty-instrument makes a repo emit one.",
+  "author": {
+    "name": "EQTY Lab"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "eqty",
+    "lineage",
+    "provenance",
+    "manifest",
+    "verification",
+    "langchain",
+    "langgraph",
+    "deepagents"
+  ],
+  "skills": [
+    "./eqty-instrument",
+    "./eqty-manifest"
+  ],
+  "interface": {
+    "displayName": "EQTY Skills",
+    "shortDescription": "Read, verify and emit EQTY lineage manifests",
+    "longDescription": "eqty-manifest parses an EQTY lineage manifest and verifies its signatures, content addresses, statement integrity and hardware attestation evidence. eqty-instrument makes a repo emit a manifest, as a patch for a human to review.",
+    "developerName": "EQTY Lab",
+    "category": "Developer Tools",
+    "defaultPrompt": [
+      "What does this manifest show?",
+      "Verify this EQTY manifest",
+      "Instrument this repo to emit an EQTY manifest"
+    ]
+  }
+}
