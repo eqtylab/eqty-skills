@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.5 — 2026-09-25
+
+- **eqty-manifest** — when a hardware attestation's evidence blob is absent,
+  unreadable or of an unsupported type, its line now reads *nothing to check —
+  evidence blob not in the manifest (urn:cid:…)* instead of *report signature not
+  checked · vendor chain not checked*, so it cannot be mistaken for evidence that
+  is present but uncheckable. Same wording in the HTML report.
+
 ## 0.1.4 — 2026-09-25
 
 - **eqty-manifest** — blobs referenced from an IdentityAttestation's `identity`

@@ -555,7 +555,7 @@ def verify_manifest_attestations(data, only_statement_id=None):
             # Present-but-undecodable is a different fault from absent: the
             # content check reports it as invalid_base64, so say the same here.
             present = P.strip_urn(cid) in m.blobs
-            results[sid] = {"valid": None,
+            results[sid] = {"valid": None, "cid": cid,
                             "reason": "report_blob_invalid" if present else "report_blob_missing",
                             "detail": ("evidence references %s but that blob is not valid base64"
                                        if present else
@@ -589,6 +589,7 @@ def verify_manifest_attestations(data, only_statement_id=None):
         ak = m.raw_bytes(P.strip_urn(ev.get("AKPublicKey") or ""))
         if sig is None or ak is None:
             results[sid] = {"valid": None, "reason": "report_blob_missing",
+                            "cid": ev.get("quoteSignature") if sig is None else ev.get("AKPublicKey"),
                             "detail": "the quote's %s blob is not in the manifest (or not valid base64)"
                                       % ("quoteSignature" if sig is None else "AKPublicKey")}
         else:

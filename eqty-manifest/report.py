@@ -767,6 +767,10 @@ def _verification_html(v):
                 binding = _pill(*STATE[i["binding"]]) if i.get("has_binding") else "—"
                 cls, txt = STATE[i.get("key_binding")]
                 key = _pill(cls, txt + (" — %s" % i["key_binding_via"] if i.get("key_binding_via") else ""))
+                if SM.nothing_to_check(i):
+                    a("<tr><td class='did'>%s</td><td colspan='3'>%s</td><td>%s</td></tr>" % (
+                        E(i["label"]), _pill("unk", "nothing to check — " + SM.nothing_to_check(i)), key))
+                    continue
                 a("<tr><td class='did'>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
                     E(i["label"]), _pill(*STATE[i["signature"]]), chain, binding, key))
             a("</tbody></table></div>")

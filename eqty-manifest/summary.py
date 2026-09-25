@@ -58,6 +58,18 @@ KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is checked 
                    "commitment rule is defined in EQTY's vcomp code and integrity-py does not "
                    "expose it.")
 SEVERITY = {"failed": 0, "unchecked": 1, "missing": 2}
+# Evidence where no check could run at all, in words that cannot be mistaken
+# for evidence that is present but could not be checked.
+NOTHING_TO_CHECK = {"report_blob_missing": "evidence blob not in the manifest",
+                    "report_blob_invalid": "evidence blob is not valid base64",
+                    "no_report": "the evidence names no report",
+                    "unsupported_evidence_type": "evidence type not supported by this skill"}
+
+
+def nothing_to_check(i):
+    """Why no check ran for a hardware item, or None when some did."""
+    why = NOTHING_TO_CHECK.get(i.get("reason")) if i.get("nothing_checked") else None
+    return why and why + (" (%s)" % i["cid"] if i.get("cid") else "")
 DRIFT = "Registration does not re-hash"
 DRIFT_NOTE = ("Tampering or canonicalization drift from an older emitter; "
               "the manifest alone cannot tell which.")
@@ -198,7 +210,8 @@ def _hardware(data, creds):
                       "chain_via_binding": via_binding,
                       "key_binding": key_ok, "key_binding_detail": key_why, "key_binding_via": None,
                       "did": ((S.get(sid, {}).get("credential") or {}).get("credentialSubject") or {}).get("id"),
-                      "evidence": r.get("evidence_declared") or [], "reason": r.get("reason")})
+                      "evidence": r.get("evidence_declared") or [], "reason": r.get("reason"),
+                      "nothing_checked": not checks, "cid": r.get("cid")})
     # A TPM quote that binds the DID is itself bound to a verified hardware report
     # of the same identity, so that report vouches for the DID through it.
     # ponytail: matched by DID, not by the exact report the TPM bound through; one
@@ -456,6 +469,9 @@ def render_text(s, full=False):
                      if i["chain_via_binding"] else _state(i["chain"]))
             binding = " · hardware binding %s" % _state(i["binding"]) if i["has_binding"] else ""
             key = _state(i["key_binding"]) + (" (%s)" % i["key_binding_via"] if i["key_binding_via"] else "")
+            if nothing_to_check(i):
+                L.append("- %s: nothing to check — %s · key binding %s" % (i["label"], nothing_to_check(i), key))
+                continue
             L.append("- %s: report signature %s · vendor chain %s%s · key binding %s"
                      % (i["label"], _state(i["signature"]), chain, binding, key))
         if any(i["key_binding"] is None for i in h["items"]):

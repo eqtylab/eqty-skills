@@ -210,6 +210,10 @@ How to read it:
   A **TPM** quote has no vendor chain of its own: its attestation key is trusted
   only through *hardware binding* to a report that verified (the line then says
   "vendor chain not needed"). Without that binding it is never verified.
+  When the evidence itself is absent, unreadable or of an unsupported type, the
+  line reads **nothing to check — <why>** (with the missing blob's CID) instead:
+  say the manifest does not carry the evidence, not that the evidence failed or
+  could not be checked.
 - **Key binding** — does the hardware vouch for the DID it claims? Checked
   through a TPM quote whose credential declares `userData: {type: "key"}`: the
   quote's extraData must be the DID's public key. It reads *verified* only when
