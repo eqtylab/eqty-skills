@@ -43,11 +43,15 @@ distributed today.
 
 ## eqty-instrument, Mode 2
 
-- **Step 1 needs the `claude` CLI.** Mode 2 draws its control-flow graph with
-  fresh, isolated `claude -p` processes (`isolated_cfg.py`) and stops if the CLI
-  is not on PATH, rather than fall back to an in-session agent. Under Codex,
-  Mode 2 therefore needs Claude Code installed too; a `codex exec` route is in
-  progress.
+- **Step 1 needs the `claude` or `codex` CLI.** Mode 2 draws its control-flow
+  graph with fresh, isolated `claude -p` or `codex exec` processes
+  (`isolated_cfg.py`) and stops if neither is on PATH, rather than fall back to
+  an in-session agent.
+- **Under Codex, reads outside the target are audited, not blocked.** Codex's
+  sandbox stops writes outside the copy and network access, but lets a shell
+  command read anywhere. `isolated_cfg.py` fails the run if a command names an
+  outside path; a path built at run time would not be caught. Under Claude, file
+  reads are structured tool calls, so that check is exact.
 - **Each run starts two agent sessions on your account.** They count against
   your usage.
 - A fuller Mode 2 list is still being written.

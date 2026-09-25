@@ -295,6 +295,6 @@ do not open a pull request against a repository you were not pointed at.
 | `references/upstream/` | the `eqty-lineage` originals Mode 1 cites by `file:line`, verbatim, with `SOURCES.md` |
 | `detect.py` | stdlib-only AST scan → JSON edit plan + human summary |
 | `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
-| `isolated_cfg.py` | Mode 2 step 1: runs the L1 and L2 CFG agents as fresh, isolated `claude -p` processes and checks nothing leaked |
+| `isolated_cfg.py` | Mode 2 step 1: runs the L1 and L2 CFG agents as fresh, isolated `claude -p` or `codex exec` processes and checks nothing leaked |
 | `examples/mode1/` | real Mode 1 runs — `*_before.py`, `*_after.py`, `changes.diff` |
 | `examples/mode2/` | real Mode 2 runs, auto and HITL — before, after, diff, manifest |

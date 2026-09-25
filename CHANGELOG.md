@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 — 2026-09-25
+
+- **eqty-instrument, Mode 2** — step 1 runs under Codex too: `isolated_cfg.py
+  --agent codex` starts the control-flow-graph agents as isolated `codex exec`
+  processes, audited like the Claude ones. Claude stays the default when both
+  are installed.
+
 ## 0.1.0 — 2026-09-25
 
 First release of the two EQTY skills, as a Claude Code and Codex plugin.

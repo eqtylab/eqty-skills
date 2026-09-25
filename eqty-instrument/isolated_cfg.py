@@ -1,33 +1,47 @@
 #!/usr/bin/env python3
 """isolated_cfg.py — Mode 2 step 1: draw the CFG with fresh, isolated agents.
 
-    python3 <skill-dir>/isolated_cfg.py <target-repo> --out <dir> [--model M] [--run "<user's run>"]
+    python3 <skill-dir>/isolated_cfg.py <target-repo> --out <dir> [--agent claude|codex] [--model M] [--run "<user's run>"]
 
 The orchestrator never draws the CFG and never dispatches it as an in-session
 subagent: a subagent inherits the session's context — the repo path, git status,
-recent commits, CLAUDE.md, memory and the skills list, which carries this skill's
-own description of what the diagram is for. This script launches each level as a
-separate `claude -p` process that sees only its prompt and a copy of the target:
+recent commits, CLAUDE.md or AGENTS.md, memory and the skills list, which carries
+this skill's own description of what the diagram is for. This script launches
+each level as a separate process that sees only its prompt and a copy of the
+target, in a neutral temp directory outside any git repo (no git status, no commit
+history, no project instructions, no project memory). L1 runs first; L2 is a
+second fresh process given L1's diagram and L1's `Run:` line, carried verbatim —
+the only thing that flows from one level to the next.
 
-- the copy lives in a neutral temp directory outside any git repo (no git status,
-  no commit history, no project CLAUDE.md, no project memory);
-- `--disable-slash-commands` (no skills), `--strict-mcp-config` (no MCP servers),
-  `--setting-sources ""` (no user/project settings, so no plugin hooks), CLAUDE.md
-  auto-discovery excluded, tools limited to Read/Write/Glob/Grep, no session saved;
-- L1 runs first; L2 is a second fresh process given L1's diagram and L1's `Run:`
-  line, carried verbatim — the only thing that flows from one level to the next.
+`--agent claude` (the default when `claude` is on PATH) runs `claude -p` with
+`--disable-slash-commands` (no skills), `--strict-mcp-config` (no MCP servers),
+`--setting-sources ""` (no user/project settings, so no plugin hooks), CLAUDE.md
+auto-discovery excluded, tools limited to Read/Write/Glob/Grep, no session saved.
 
-Every run is then checked, and the result written to `<out>/isolation.json`:
-the init record (no skills, MCP servers or slash commands), every tool call inside
-the agent's own directory, the prompt free of project words, and the output shaped
-as required. Exit 0 only if every check passes; otherwise the CFG must not be used.
+`--agent codex` runs `codex exec` with a fresh, empty CODEX_HOME holding only a
+link to the user's `auth.json` — so no user config, skills, MCP servers, plugins,
+hooks, memories or `~/.codex/AGENTS.md` — plus `--ignore-rules`, web search off,
+the extra tool families disabled, a minimal shell environment, no session saved,
+and the `workspace-write` sandbox, which *enforces* that writes stay in the
+agent's directory and that there is no network.
 
-Known residue: the account's `userEmail` line is injected at login and cannot be
-removed without an API key (`--bare`). It is recorded in isolation.json.
+Every run is then checked, and the result written to `<out>/isolation.json`: for
+Claude the init record (no skills, MCP servers or slash commands) and every tool
+call inside the agent's own directory; for Codex the home it ran with, every event
+type (anything but messages, reasoning, shell commands and file writes fails), every
+file write inside its directory, and every shell command free of outside paths;
+for both, the prompt free of project words and the output shaped as required.
+Exit 0 only if every check passes; otherwise the CFG must not be used.
+
+Known residue, recorded in isolation.json: under Claude, the account's `userEmail`
+line is injected at login and cannot be removed without an API key (`--bare`).
+Under Codex, its built-in `.system` skills are installed into the fresh home (none
+concerns this project), and its sandbox lets a shell command *read* anywhere, so
+read containment is audited from the command text rather than enforced.
 
 Outputs: <out>/L1.md, <out>/L2.md, <out>/isolation.json. Assembling
 <target>.cfg.html from them is step 1's last part (references/mode2.md).
-Stdlib only; needs the `claude` CLI on PATH.
+Stdlib only; needs the `claude` or `codex` CLI on PATH.
 """
 import argparse
 import json
@@ -88,16 +102,136 @@ def run_agent(workdir, prompt, model):
     if model:
         cmd += ["--model", model]
     proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True)
+    return proc.returncode, parse_jsonl(proc.stdout), proc.stderr
+
+
+def parse_jsonl(text):
     events = []
-    for line in proc.stdout.splitlines():
+    for line in text.splitlines():
         try:
             events.append(json.loads(line))
         except json.JSONDecodeError:
             pass
-    return proc.returncode, events, proc.stderr
+    return events
 
 
-def check_run(level, workdir, prompt, events, out_name):
+# Codex feature families a CFG agent has no use for; each is a way out of the copy.
+CODEX_DISABLED = ["apps", "browser_use", "computer_use", "in_app_browser", "image_generation",
+                  "plugins", "memories", "goals", "hooks"]
+# The event items a contained Codex run produces. Anything else — a web search, an
+# MCP call, a sub-agent whose commands the stream would not show — fails the run.
+CODEX_ITEMS = {"agent_message", "reasoning", "command_execution", "file_change", "todo_list"}
+
+
+def run_agent_codex(workdir, prompt, model):
+    """One fresh `codex exec` process. Its events end with a synthetic
+    `isolation.codex_home` record describing the home it ran with."""
+    real_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
+    real_auth = os.path.join(real_home, "auth.json")
+    home = tempfile.mkdtemp(prefix="codex-home-")
+    auth = os.path.join(home, "auth.json")
+    if os.path.exists(real_auth):
+        os.symlink(real_auth, auth)
+    cmd = ["codex", "exec", prompt, "--json", "--ephemeral", "--skip-git-repo-check",
+           "-C", workdir, "-s", "workspace-write", "--ignore-rules",
+           "-c", 'web_search="disabled"', "-c", 'shell_environment_policy.inherit="core"']
+    for feature in CODEX_DISABLED:
+        cmd += ["--disable", feature]
+    if model:
+        cmd += ["--model", model]
+    env = dict(os.environ, CODEX_HOME=home)
+    try:
+        proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, env=env)
+    finally:
+        # A token refresh may replace the link with a new file; put it back where the
+        # user's own Codex reads it, or the next login would present a stale token.
+        if os.path.exists(auth) and not os.path.islink(auth):
+            os.replace(auth, real_auth)
+        skills_dir = os.path.join(home, "skills")
+        record = {"type": "isolation.codex_home", "home": home,
+                  "skills": sorted(os.listdir(skills_dir)) if os.path.isdir(skills_dir) else [],
+                  "system_skills": sorted(os.listdir(os.path.join(skills_dir, ".system")))
+                  if os.path.isdir(os.path.join(skills_dir, ".system")) else [],
+                  "config_files": [f for f in ("config.toml", "AGENTS.md", "hooks.json")
+                                   if os.path.exists(os.path.join(home, f))]}
+        shutil.rmtree(home, ignore_errors=True)
+    return proc.returncode, parse_jsonl(proc.stdout) + [record], proc.stderr
+
+
+# A Codex command string arrives wrapped in the shell it ran under.
+SHELL_WRAPPER = re.compile(r"^\S*/(?:ba|z)?sh\s+-l?c\s+")
+HARMLESS_PATHS = ("/dev/null", "/dev/stdout", "/dev/stderr")
+
+
+def command_escapes(command, workdir):
+    """Why a shell command reaches outside `workdir`, or None. Heuristic: it reads the
+    command text, so it catches paths that are written out, not ones computed at
+    run time. The sandbox, not this, is what stops writes and network."""
+    body = SHELL_WRAPPER.sub("", command, count=1)
+    roots = {workdir, os.path.realpath(workdir)}
+    for token in re.findall(r"(?<![\w.$-])/[^\s'\"`;|&)]*", body):
+        if token in HARMLESS_PATHS or token == "/":
+            continue
+        if not any(token == r or token.startswith(r + os.sep) for r in roots):
+            return "absolute path %s" % token
+    if re.search(r"(?<![\w/])~|\$HOME\b|\$\{HOME\}", body):
+        return "home directory"
+    if re.search(r"(?:^|[\s'\"/=])\.\.(?:/|[\s'\"]|$)", body):
+        return "parent directory"
+    if re.search(r"\b(?:curl|wget|ssh|scp|nc|pip3?|npm|uv|git)\b", body):
+        return "network or install command"
+    return None
+
+
+def read_output(workdir, out_name):
+    out_path = os.path.join(workdir, out_name)
+    text = open(out_path).read() if os.path.exists(out_path) else ""
+    return text, next((l for l in text.splitlines() if l.strip()), "")
+
+
+def check_run_codex(level, workdir, prompt, events, out_name):
+    home = next((e for e in events if e.get("type") == "isolation.codex_home"), None)
+    items = [e["item"] for e in events if e.get("type") == "item.completed" and "item" in e]
+    commands = [i.get("command", "") for i in items if i.get("type") == "command_execution"]
+    real = os.path.realpath(workdir)
+    outside = [f"file_change {c.get('path')}" for i in items if i.get("type") == "file_change"
+               for c in i.get("changes") or []
+               if not os.path.realpath(os.path.join(workdir, c.get("path", ""))).startswith(real + os.sep)]
+    outside += [f"command {c} ({why})" for c in commands for why in [command_escapes(c, workdir)] if why]
+    unexpected = sorted({i.get("type") for i in items} - CODEX_ITEMS)
+    failed = [e.get("type") for e in events if e.get("type") in ("turn.failed", "error")]
+    text, first = read_output(workdir, out_name)
+    checks = {
+        "prompt_has_no_project_words": not LEAK_WORDS.search(prompt),
+        "workdir_outside_git": not inside_git(workdir),
+        "fresh_codex_home": bool(home) and not home["config_files"]
+                            and set(home["skills"]) <= {".system"},
+        "only_expected_event_items": not unexpected,
+        "every_tool_call_inside_workdir": not outside,
+        "agent_succeeded": any(e.get("type") == "turn.completed" for e in events) and not failed,
+        "output_has_run_line": first.startswith("Run:"),
+        "output_has_mermaid": "```mermaid" in text,
+    }
+    return {
+        "level": level,
+        "agent": "codex",
+        "workdir": workdir,
+        "init": {"cwd": workdir, "codex_home": home, "unexpected_items": unexpected},
+        "tool_calls": commands + [f"file_change {c.get('path')}" for i in items
+                                  if i.get("type") == "file_change" for c in i.get("changes") or []],
+        "outside_workdir": outside,
+        "checks": checks,
+        "passed": all(checks.values()),
+        "known_residue": "Codex's built-in .system skills (%s) are installed into the fresh home; "
+                         "reads are audited from command text, not enforced by the sandbox"
+                         % ", ".join(home["system_skills"] if home else []),
+    }, text
+
+
+def check_run(level, workdir, prompt, events, out_name, agent="claude"):
+    if agent == "codex":
+        return check_run_codex(level, workdir, prompt, events, out_name)
     init = next((e for e in events if e.get("type") == "system" and e.get("subtype") == "init"), {})
     result = next((e for e in events if e.get("type") == "result"), {})
     tools = [c for e in events if e.get("type") == "assistant"
@@ -108,9 +242,7 @@ def check_run(level, workdir, prompt, events, out_name):
         path = t["input"].get("file_path") or t["input"].get("path") or ""
         if path and not os.path.realpath(os.path.join(workdir, path)).startswith(real + os.sep):
             outside.append(f"{t['name']} {path}")
-    out_path = os.path.join(workdir, out_name)
-    text = open(out_path).read() if os.path.exists(out_path) else ""
-    first = next((l for l in text.splitlines() if l.strip()), "")
+    text, first = read_output(workdir, out_name)
     checks = {
         "prompt_has_no_project_words": not LEAK_WORDS.search(prompt),
         "workdir_outside_git": not inside_git(workdir),
@@ -126,6 +258,7 @@ def check_run(level, workdir, prompt, events, out_name):
     }
     return {
         "level": level,
+        "agent": "claude",
         "workdir": workdir,
         "model": init.get("model"),
         "claude_code_version": init.get("claude_code_version"),
@@ -140,22 +273,30 @@ def check_run(level, workdir, prompt, events, out_name):
     }, text
 
 
+AGENTS = {"claude": run_agent, "codex": run_agent_codex}
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("repo", help="the target repository (read, never modified)")
     ap.add_argument("--out", required=True, help="where L1.md, L2.md and isolation.json go")
+    ap.add_argument("--agent", choices=AGENTS,
+                    help="which CLI starts the agents (default: claude if on PATH, else codex)")
     ap.add_argument("--model", help="model for both agents (default: the CLI's default)")
     ap.add_argument("--run", help="the run the user asked for; replaces L1's own choice")
     ap.add_argument("--keep", action="store_true", help="keep the temp workdirs")
     args = ap.parse_args()
 
-    if not shutil.which("claude"):
-        sys.exit("isolated_cfg: the `claude` CLI is not on PATH, so no isolated agent can be started. "
-                 "Do not fall back to an in-session subagent; report this and stop.")
+    agent = args.agent or next((a for a in AGENTS if shutil.which(a)), None)
+    if not agent or not shutil.which(agent):
+        sys.exit("isolated_cfg: %s not on PATH, so no isolated agent can be started. "
+                 "Do not fall back to an in-session subagent; report this and stop."
+                 % ("the `%s` CLI is" % agent if agent else "neither the `claude` nor the `codex` CLI is"))
+    run = AGENTS[agent]
     repo = os.path.realpath(args.repo)
     os.makedirs(args.out, exist_ok=True)
     base = tempfile.mkdtemp(prefix="cfg-")
-    report = {"target": repo, "levels": []}
+    report = {"target": repo, "agent": agent, "levels": []}
 
     # L1
     l1_dir = os.path.join(base, "l1")
@@ -164,8 +305,8 @@ def main():
     l1_prompt = "\n\n".join([L1_PROMPT, PROGRAM.format(extra=""), "**Budget:** about 9 boxes.",
                              OUTPUT.format(name="L1.md", run_rule=run_rule,
                                            tail="4. Under a heading `## Other entry points`, list the runnable entry points or paths your diagram does not cover.\n")])
-    code, events, err = run_agent(l1_dir, l1_prompt, args.model)
-    l1_report, l1_text = check_run("L1", l1_dir, l1_prompt, events, "L1.md")
+    code, events, err = run(l1_dir, l1_prompt, args.model)
+    l1_report, l1_text = check_run("L1", l1_dir, l1_prompt, events, "L1.md", agent)
     report["levels"].append(l1_report | {"prompt": l1_prompt})
     if not l1_report["passed"]:
         json.dump(report, open(os.path.join(args.out, "isolation.json"), "w"), indent=2)
@@ -185,8 +326,8 @@ def main():
         "**Budget:** about 30 boxes.",
         OUTPUT.format(name="L2.md", run_rule=L2_RUN_RULE, tail=""),
     ])
-    code, events, err = run_agent(l2_dir, l2_prompt, args.model)
-    l2_report, l2_text = check_run("L2", l2_dir, l2_prompt, events, "L2.md")
+    code, events, err = run(l2_dir, l2_prompt, args.model)
+    l2_report, l2_text = check_run("L2", l2_dir, l2_prompt, events, "L2.md", agent)
     l2_report["checks"]["run_line_carried_verbatim"] = next(
         (l for l in l2_text.splitlines() if l.strip()), "") == run_line
     l2_report["passed"] = all(l2_report["checks"].values())
@@ -199,7 +340,7 @@ def main():
     if not args.keep:
         shutil.rmtree(base, ignore_errors=True)
     for lv in report["levels"]:
-        print(f"{lv['level']}: {'PASS' if lv['passed'] else 'FAIL'}  model={lv['model']}  "
+        print(f"{lv['level']}: {'PASS' if lv['passed'] else 'FAIL'}  agent={agent}  model={lv.get('model') or args.model or 'default'}  "
               f"tool calls={len(lv['tool_calls'])}  outside workdir={len(lv['outside_workdir'])}")
     print(f"wrote {args.out}/L1.md, L2.md, isolation.json")
     return 0

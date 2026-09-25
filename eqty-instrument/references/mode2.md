@@ -57,7 +57,7 @@ file, `references/mode2ideas.md`, the SDK, or the word "EQTY."**
 **Dispatch them with `isolated_cfg.py`, never as in-session subagents:**
 
 ```sh
-python3 <skill-dir>/isolated_cfg.py <target-repo> --out <scratch-dir> [--run "<run the user named>"]
+python3 <skill-dir>/isolated_cfg.py <target-repo> --out <scratch-dir> [--agent claude|codex] [--run "<run the user named>"]
 ```
 
 A subagent spawned from your session inherits that session's context:
@@ -68,12 +68,14 @@ A subagent spawned from your session inherits that session's context:
 
 That is the contamination this stop sign exists to prevent, arriving through the
 harness instead of through a file. The script starts each level as a separate,
-fresh `claude -p` process:
+fresh process — `claude -p` by default, `codex exec` with `--agent codex` (the
+default when only `codex` is on PATH):
 - **Where it runs:** a neutral temp directory outside any git repo, holding only a copy of the target.
-- **What it gets:** no skills, no MCP servers, no settings or plugin hooks, no CLAUDE.md, and only the Read/Write/Glob/Grep tools.
-- **What it checks afterwards:** every run's init record and every tool call. It writes `isolation.json` and exits non-zero if anything leaked.
+- **What it gets under Claude:** no skills, no MCP servers, no settings or plugin hooks, no CLAUDE.md, and only the Read/Write/Glob/Grep tools.
+- **What it gets under Codex:** a fresh, empty `CODEX_HOME` holding only a link to the user's login, so no user config, skills, MCP servers, plugins, hooks, memories or `AGENTS.md`; web search and the extra tool families off; the `workspace-write` sandbox, which enforces no writes outside the copy and no network.
+- **What it checks afterwards:** under Claude, every run's init record and every tool call; under Codex, the home it ran with, every event type, every file write and every shell command. It writes `isolation.json` and exits non-zero if anything leaked.
 
-**If it exits non-zero, or the `claude` CLI is not available, stop and report.** Do
+**If it exits non-zero, or neither the `claude` nor the `codex` CLI is available, stop and report.** Do
 not fall back to an in-session subagent and do not draw the CFG yourself.
 
 **You do not choose which run of the program gets diagrammed.** L1 chooses it
@@ -558,7 +560,7 @@ procedure, not by reading the SDK.
 ## Review checklist — print this with the patch
 
 - [ ] The CFG was drawn by agents that never saw this file, `references/mode2ideas.md` or the SDK — and L2 was **dispatched**, not derived from L1.
-- [ ] Both CFG agents were started by `isolated_cfg.py`, not as in-session subagents. Its `isolation.json` sits beside the CFG and every check in it passes: no skills, no MCP servers, tools limited, every tool call inside the agent's own copy.
+- [ ] Both CFG agents were started by `isolated_cfg.py`, not as in-session subagents. Its `isolation.json` sits beside the CFG, names the agent (`claude` or `codex`), and every check in it passes: no skills, no MCP servers, tools limited, every tool call inside the agent's own copy.
 - [ ] The user was asked auto vs HITL at step 2, and asked nothing about nodes before it.
 - [ ] A node list exists, in writing, and predates the patch.
 - [ ] In HITL: the nodes added to chain the user's picks are listed, with why.
