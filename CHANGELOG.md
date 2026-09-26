@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.7 — 2026-09-26
+
+- **eqty-manifest** — key binding is now checked on Intel TDX and NVIDIA reports
+  too, not only through TPM quotes. When a credential declares `userData: {type:
+  "key"}`, the DID's public key must sit in a field the hardware signs: TDX
+  `REPORTDATA[32:64]`, the NVIDIA SPDM request nonce. It counts only when the
+  report itself verified; a mismatch fails. Evidence without a key claim (older
+  `EqtyVComp…V0` reports, Azure runtime-data evidence with no TPM quote) stays
+  *not checked*.
+
 ## 0.1.6 — 2026-09-25
 
 - **eqty-manifest** — loads more reliably: the description now leads with what

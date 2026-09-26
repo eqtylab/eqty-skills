@@ -35,14 +35,14 @@ content check (eqty_sdk get_cid_for_bytes) and verify_attestation. The only
 logic of its own is the joins between them and two field comparisons.
 
 KEY BINDING: whether the hardware vouches for the DID the attestation claims.
-Checked through a TPM quote whose credential declares `userData.type: key`:
-the quote's extraData must be the DID's public key, and it counts only when
-the quote itself verified and is bound to a verified hardware report -- which
+Checked when the credential declares `userData.type: key`: the signed evidence
+must carry the DID's public key (a TPM quote's extraData, an Intel TDX
+REPORTDATA, an NVIDIA SPDM nonce). It counts only when that evidence itself
+verified; a TPM quote must also be bound to a verified hardware report, which
 then reads as bound too. Anything else is a KNOWN GAP, printed as "not checked"
-and stated once below the evidence lines: for bare Intel TDX, AMD SEV-SNP and
-NVIDIA reports the commitment rule lives in EQTY's vcomp code and integrity-py
-exposes no primitive for it. "Not checked" does not affect the exit code; a
-failed key binding does.
+and stated once below the evidence lines: without a key claim the commitment
+rule lives in EQTY's vcomp code and integrity-py exposes no primitive for it.
+"Not checked" does not affect the exit code; a failed key binding does.
 """
 import os
 import sys
@@ -53,10 +53,10 @@ import parse_manifest as P  # noqa: E402
 import verify_credentials as V  # noqa: E402
 
 LIMIT = 10
-KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is checked only through a "
-                   "TPM quote that carries the DID's key; where it reads not checked, the "
-                   "commitment rule is defined in EQTY's vcomp code and integrity-py does not "
-                   "expose it.")
+KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is checked where the "
+                   "evidence declares the DID's key (userData type \"key\"); where it reads not "
+                   "checked, the commitment rule is defined in EQTY's vcomp code and integrity-py "
+                   "does not expose it.")
 SEVERITY = {"failed": 0, "unchecked": 1, "missing": 2}
 # Evidence where no check could run at all, in words that cannot be mistaken
 # for evidence that is present but could not be checked.

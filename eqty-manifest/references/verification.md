@@ -311,11 +311,27 @@ are checked in four parts, each reported separately:
    `identity.userData = {type: "key", value: <DID>}`, the value must be the
    credential's own subject and the quote's `extraData` (TPM2 qualifying data)
    must be that DID's P-256 public-key **X coordinate** — the compressed key
-   without its `02`/`03` prefix. This is the rule observed in every EQTY TPM
-   quote seen (three, bound through AMD and through TDX), not a published spec.
-   It counts only when parts 1 and 3 verified; the hardware report the quote is
-   bound to then reads bound to the DID *through the TPM quote*. For any other
-   DID type no check is added and key binding stays *not checked*.
+   without its `02`/`03` prefix. It counts only when parts 1 and 3 verified; the
+   hardware report the quote is bound to then reads bound to the DID *through the
+   TPM quote*. For any other DID type no check is added and key binding stays
+   *not checked*.
+
+**Key binding on Intel TDX and NVIDIA reports** follows the same rule directly,
+with no TPM in between. When the credential declares `userData: {type: "key",
+value: <its own DID>}`, the DID's X coordinate must sit in a field the hardware
+signs:
+
+| Evidence | Where | Signed by |
+|---|---|---|
+| TPM 2.0 quote | `extraData` | the attestation key (bound as above) |
+| Intel TDX quote | `REPORTDATA[32:64]` (quote bytes 600–632); the first half is zero | the TD report, through the quoting enclave |
+| NVIDIA CC report | nonce of the opening SPDM `GET_MEASUREMENTS` request (code `0xE0`), report bytes 4–36 | the SPDM signature, which covers request and response |
+
+It counts only when that report's own signature and vendor chain verified. The
+rule is observed, not published: it holds in all 16 key-claiming reports seen
+across five manifests (TPM, TDX, NVIDIA). Evidence with another `userData` type —
+Azure's `sha256` runtime data, or none in the older `EqtyVComp…V0` layout —
+stays *not checked* unless a TPM quote binds it.
 
 Which of these links are Azure's: part 3's runtime-data layout (`HCLAkPub`,
 `report_data` = SHA-256 of the runtime JSON) is Azure's paravisor; part 4 is

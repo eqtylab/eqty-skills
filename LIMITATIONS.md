@@ -60,13 +60,14 @@ distributed today.
 
 Every check the skill cannot run is reported as *not checked* — never as a pass.
 
-- **Hardware key binding is checked only through a TPM quote.** Whether the
-  hardware vouches for the DID an attestation claims is verified when a TPM
-  quote carries the DID's key and is bound to a verified AMD SEV-SNP or Intel
-  TDX report (Azure confidential VMs). For a bare Intel TDX, AMD SEV-SNP or
-  NVIDIA report it is printed as *not checked*: the commitment rule lives in
-  EQTY's code and `eqty-sdk` exposes no primitive for it. The TPM rule — the
-  quote's extraData is the DID key's X coordinate — is observed, not published.
+- **Hardware key binding is checked only where the evidence declares the DID's
+  key.** When a credential declares `userData.type: "key"`, the skill checks that
+  the signed TPM quote, Intel TDX report or NVIDIA report carries the DID's public
+  key. Evidence without that claim — older `EqtyVComp…V0` reports, or Azure
+  runtime-data evidence with no TPM quote — is printed as *not checked*: its
+  commitment rule lives in EQTY's code and `eqty-sdk` exposes no primitive for
+  it. The rule itself (the DID key's X coordinate in a signed field) is
+  observed, not published.
 - **Measurements are not compared with reference values.** Verified hardware
   evidence means the report came from genuine Intel, AMD or NVIDIA silicon and is
   intact — not that the enclave ran the code you expect. Reference measurements

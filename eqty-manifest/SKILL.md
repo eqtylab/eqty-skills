@@ -229,18 +229,20 @@ How to read it:
   say the manifest does not carry the evidence, not that the evidence failed or
   could not be checked.
 - **Key binding** — does the hardware vouch for the DID it claims? Checked
-  through a TPM quote whose credential declares `userData: {type: "key"}`: the
-  quote's extraData must be the DID's public key. It reads *verified* only when
-  the quote itself verified and is bound to a verified hardware report, and that
-  report then reads *verified (through the TPM quote)*. A mismatch is a failure.
-  It shows the attested VM vouched for the DID, not that the key never left it —
-  that rests on the measured software, which is not compared with reference
-  values.
-- **Known gap: key binding without a TPM quote.** For a bare Intel TDX, AMD
-  SEV-SNP or NVIDIA report, the commitment rule is defined in EQTY's vcomp code
-  and integrity-py does not expose it, so those lines read *not checked*. When
-  asked "is this hardware bound to that identity" about such a report, say it
-  is not verified here.
+  when the credential declares `userData: {type: "key"}`: the signed evidence
+  must carry the DID's public key — a TPM quote's extraData, an Intel TDX
+  report's `REPORTDATA`, an NVIDIA report's SPDM nonce. It reads *verified* only
+  when that evidence itself verified; a TPM quote must also be bound to a
+  verified hardware report, which then reads *verified (through the TPM quote)*.
+  A mismatch is a failure. It shows the attested machine vouched for the DID,
+  not that the key never left it — that rests on the measured software, which is
+  not compared with reference values.
+- **Known gap: key binding without a key claim.** Evidence whose credential
+  declares no `userData.type: "key"` (older `EqtyVComp…V0` reports, Azure's
+  runtime-data style without a TPM quote) reads *not checked*: its commitment
+  rule is defined in EQTY's vcomp code and integrity-py does not expose it. When
+  asked "is this hardware bound to that identity" about such a report, say it is
+  not verified here.
 
 Exit code: **0** everything verified, **1** something failed or was tampered
 with, **2** nothing failed but something is unchecked or missing — including a

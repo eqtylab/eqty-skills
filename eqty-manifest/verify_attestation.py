@@ -391,6 +391,48 @@ def did_key_x(did):
     return raw[3:] if raw[:2] == b"\x80\x24" and len(raw) == 35 else None
 
 
+def committed_key_bytes(kind, raw):
+    """The 32 signed bytes where EQTY's `userData: {type: "key"}` evidence puts the
+    DID's public-key X coordinate, or None where this evidence has no such field.
+    TPM: the quote's extraData. Intel TDX: REPORTDATA[32:64] (the first half is
+    zero). NVIDIA CC: the nonce of the SPDM GET_MEASUREMENTS request (code 0xE0)
+    that opens the report, which the SPDM signature covers."""
+    if kind == "tpm":
+        return bytes.fromhex(parse_tpm_quote(raw)["extra_data"])
+    if kind == "tdx" and len(raw) >= TDX_HEADER_LEN + 584:
+        return raw[TDX_HEADER_LEN + 552:TDX_HEADER_LEN + 584]
+    if kind == "nvidia" and len(raw) >= 36 and raw[1] == 0xE0:
+        return raw[4:36]
+    return None
+
+
+def key_binding_check(kind, raw, did_claim, subject):
+    """The `key_bound_to_did` check for evidence whose credential declares
+    `userData: {type: "key", value: did_claim}`, or None when none applies (no key
+    claim, a DID that is not P-256, or evidence without a known field)."""
+    if did_claim is None:
+        return None
+    if did_claim != subject:
+        return {"check": "key_bound_to_did", "passed": False,
+                "detail": "the evidence commits to %s, not to the credential's subject" % did_claim}
+    x, got = did_key_x(did_claim), committed_key_bytes(kind, raw)
+    if x is None or got is None:
+        return None
+    ok = got == x
+    return {"check": "key_bound_to_did", "passed": ok,
+            "detail": None if ok else "the signed report does not carry this DID's public key"}
+
+
+def _add_key_binding(result, check):
+    """Append a key-binding check to an already-summarised result."""
+    if check is None or "checks" not in result:
+        return result
+    result["checks"].append(check)
+    if check["passed"] is False:
+        result["valid"], result["reason"] = False, "verification_failed"
+    return result
+
+
 def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None, bindings=(),
                did_claim=None, subject=None):
     """Checks the quote itself; `bindings` carries the cross-evidence checks
@@ -398,7 +440,7 @@ def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None,
 
     KEY BINDING: when the credential declares `userData: {type: "key", value:
     <DID>}`, the quote's extraData (TPM2 qualifying data) must be that DID's
-    P-256 public-key X coordinate -- the rule observed in every EQTY TPM quote.
+    P-256 public-key X coordinate -- EQTY's rule, see committed_key_bytes().
     It is checked only for the credential's own subject and a P-256 did:key;
     otherwise no check is added and key binding stays "not checked".
 
@@ -439,15 +481,9 @@ def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None,
             checks.append({"check": "bound_pcr_claim_to_quote", "passed": ok,
                            "detail": None if ok else "the PCR values the credential claims do not "
                                                      "hash to the digest the TPM signed"})
-    if did_claim is not None:
-        x = did_key_x(did_claim)
-        if did_claim != subject:
-            checks.append({"check": "key_bound_to_did", "passed": False,
-                           "detail": "the quote commits to %s, not to the credential's subject" % did_claim})
-        elif x is not None:
-            ok = bytes.fromhex(parsed["extra_data"]) == x
-            checks.append({"check": "key_bound_to_did", "passed": ok,
-                           "detail": None if ok else "the quote's extraData is not this DID's public key"})
+    kb = key_binding_check("tpm", quote, did_claim, subject)
+    if kb:
+        checks.append(kb)
     checks += list(bindings)
     return _summarize(checks, parsed, "tpm")
 
@@ -580,6 +616,10 @@ def verify_manifest_attestations(data, only_statement_id=None):
             if chain_cid and chain is None:
                 results[sid]["detail"] = ("evidence references certificate chain %s but that "
                                           "blob is not in the manifest (or not valid base64)" % chain_cid)
+        subj = cred.get("credentialSubject") or {}
+        ud = (subj.get("identity") or {}).get("userData") or {}
+        _add_key_binding(results[sid], key_binding_check(
+            kind, raw, ud.get("value") if ud.get("type") == "key" else None, subj.get("id")))
         results[sid]["evidence_declared"] = types
 
     # TPM last: its attestation key is trusted only through a hardware report
