@@ -317,6 +317,9 @@ def verification_summary(data):
     # (5) execution environment.
     hardware = _hardware(data, creds)
     for h in hardware["items"]:
+        if nothing_to_check(h):
+            issues.append(("unchecked", "Hardware evidence missing", "Nothing to check for %s: %s" % (h["label"], nothing_to_check(h))))
+            continue
         if h["signature"] is False:
             issues.append(("failed", "Hardware signature failed", "Hardware report signature failed for %s: %s" % (h["label"], h["signature_detail"])))
         elif h["signature"] is None:
@@ -413,6 +416,17 @@ def render_text(s, full=False):
                 L.append("* %d registration%s not hash to %s @id; %s (--full to list)" % (
                     n, " does" if n == 1 else "s do", "its" if n == 1 else "their",
                     "its credential verifies" if n == 1 else "each one's credential verifies"))
+            elif kind == "Missing system" and not full:
+                # One line per missing system, not one per statement pointing at it.
+                by_did = defaultdict(Counter)
+                for l in s["executed_on"]:
+                    if not l["present"]:
+                        by_did[l["did"]][l["from"].split(" ")[0]] += 1
+                for did, types in by_did.items():
+                    n = sum(types.values())
+                    L.append("* %d statement%s name%s a system not in this manifest as executedOn: %s (%s; --full to list)" % (
+                        n, "" if n == 1 else "s", "s" if n == 1 else "", did,
+                        ", ".join("%d %s" % (c, t) for t, c in types.most_common())))
             else:
                 L += _cap(lines, full, "* ")
             if kind == DRIFT:

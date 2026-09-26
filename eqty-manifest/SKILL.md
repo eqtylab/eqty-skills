@@ -1,6 +1,6 @@
 ---
 name: eqty-manifest
-description: Use this whenever the user shares or asks about a JSON file containing top-level "version", "contexts", "statements", and "blobs" keys, or that references "eqtylab.io" terms, "urn:cid:" identifiers, DID keys (did:key:z6Mk...), or types like DataRegistration/ComputationRegistration/MetadataRegistration/CredentialRegistration. These are EQTY Lab lineage/provenance manifests — signed, content-addressed audit trails of an AI agent run (or other computation). Trigger this skill for questions like "what does this manifest show", "what happened in this run", "what tools did the agent call", "summarize this trace", "was this tampered with", or any request to slice, filter, chart, or otherwise make an arbitrary EQTY manifest file consumable by a human, even if the user doesn't name the format explicitly.
+description: Use this for any EQTY lineage manifest — a JSON file (often named *manifest*.json) with top-level "version", "contexts", "statements" and "blobs" keys, "urn:cid:" identifiers, did:key DIDs, or types like ComputationRegistration or CredentialRegistration. Trigger on "check this manifest", "was it tampered with", "does it verify", "who signed it", "what hardware did it run on", "what does this manifest show", "what happened in this run", "summarize this trace", or any request to report on, chart or make such a file readable, even if the user does not name the format. If you open a JSON file and find these keys or urn:cid: identifiers, stop and load this skill before going further. Load it BEFORE answering: never judge tampering or verification by reading the raw JSON yourself. Statement order and timestamps are not evidence; only this skill's scripts check the signatures and content hashes.
 ---
 
 # EQTY Lineage Manifest
@@ -101,10 +101,24 @@ signed it, what hardware did it run on, can I rely on it* — do this, in order:
    skill's own directory — the one holding this SKILL.md. Your agent shows its
    path when the skill loads; substitute it. The scripts, `references/` and
    `roots/` all live there.
-2. **Paste its output unchanged, in a code block, before any prose.** Do not
-   rephrase it, reorder it or pick lines out of it.
+2. **Paste its output unchanged, in a code block, before any prose** — through
+   its last line, including the *Execution environment* lines and the note under
+   them. Do not rephrase it, reorder it, shorten it or pick lines out of it.
 3. Then explain it in plain words. Every figure you mention must appear in the
    block.
+
+Three things the explanation must never do:
+
+- **Treat statement order or timestamps as evidence of tampering.** `statements`
+  is a map keyed by content ID, so its order in the file means nothing, and each
+  timestamp is its signer's own clock. Whether anything was tampered with is what
+  the block's hashes and signatures say — nothing else.
+- **Call missing blobs orphaned, or the reverse.** A *missing pre-image* is a
+  blob the manifest references but does not carry; an *orphaned* blob is carried
+  but referenced by nothing. Use the block's own words.
+- **Attribute intent.** The manifest records what is there. "Deliberately
+  omitted" or "selectively shared" is a guess; say what is missing and that the
+  export did not include it.
 
 The block already carries every verification result. Run another script only
 for a follow-up the block does not answer — typically *what does this blob or

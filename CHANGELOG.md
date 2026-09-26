@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.1.6 — 2026-09-25
+
+- **eqty-manifest** — loads more reliably: the description now leads with what
+  people ask ("check this manifest", "was it tampered with", "does it verify"),
+  says to load the skill as soon as a JSON file turns out to be a manifest, and
+  forbids judging tampering from the raw JSON. On Haiku 4.5, "check the manifest
+  file … for any tampering" went from reading the raw JSON first (2/2) to loading
+  the skill first (4/4).
+- **eqty-manifest** — the explanation must quote the summary block through its
+  last line, never treat statement order or timestamps as evidence of tampering,
+  never swap "missing" and "orphaned", and never attribute intent.
+- **eqty-manifest** — statements that all name the same missing system as
+  `executedOn` fold into one line (`--full` lists them); absent hardware evidence
+  reads *nothing to check* in the problem list too.
+
 ## 0.1.5 — 2026-09-25
 
 - **eqty-manifest** — when a hardware attestation's evidence blob is absent,
