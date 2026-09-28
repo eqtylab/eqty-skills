@@ -215,7 +215,10 @@ command starts the run, which is why the choice is recorded rather than assumed:
 list, not a document with a paragraph per step. Mermaid `flowchart TD` inside
 `<pre class="mermaid">`, with the mermaid bundle **inlined** so the file renders
 from disk with no network. Box labels are short: a function name and a
-half-sentence, the length of *"`_cast()` — turn the return value into bytes"*.
+half-sentence, the length of *"_cast() — turn the return value into bytes"*.
+In the Mermaid source, every node label and every edge label goes in double
+quotes (`A["…"]`, `A -->|"…"| B`), with no backticks: an unquoted `(` in an edge
+label, or a backtick right after a quote, stops the diagram from rendering.
 Anything that needs a paragraph belongs in a reference table underneath the
 diagram, not in the box.
 

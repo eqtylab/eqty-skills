@@ -1,0 +1,152 @@
+<title>pygit.hitl.manifest.json — EQTY lineage report</title>
+<style>
+:root{
+  --bg:#fbfbf9; --fg:#1c1b19; --muted:#6b6862; --rule:#e2e0da; --panel:#ffffff;
+  --ok:#1f7a4d; --ok-bg:#e8f5ee; --warn:#8a5a00; --warn-bg:#fdf3e0;
+  --bad:#a41f1f; --bad-bg:#fdecec; --unk:#5a5f6b; --unk-bg:#eef0f3;
+  --accent:#2c4a7c;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#16171a; --fg:#e7e5e1; --muted:#9b978f; --rule:#2e3034; --panel:#1d1f23;
+    --ok:#63c795; --ok-bg:#16301f; --warn:#e0b060; --warn-bg:#332616;
+    --bad:#f08a8a; --bad-bg:#341a1a; --unk:#a8adb8; --unk-bg:#23262b;
+    --accent:#8fb3e8;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+  font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;}
+.wrap{max-width:920px;margin:0 auto;padding:40px 24px 96px}
+h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
+h2{font-size:19px;margin:44px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
+h3{font-size:15px;margin:26px 0 8px}
+p{margin:0 0 12px}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
+pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82em;
+  line-height:1.45;background:var(--panel);border:1px solid var(--rule);border-radius:6px;
+  padding:.7rem .9rem;overflow-x:auto;white-space:pre}
+.sub{color:var(--muted);margin:0 0 2px}
+.gen{color:var(--muted);font-size:12.5px;margin:14px 0 0}
+.strip{display:flex;flex-wrap:wrap;gap:0;margin:22px 0 0;border:1px solid var(--rule);
+  border-radius:8px;background:var(--panel);overflow:hidden}
+.strip div{flex:1 1 110px;padding:12px 14px;border-right:1px solid var(--rule)}
+.strip div:last-child{border-right:0}
+.strip b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em}
+.strip span{display:block;color:var(--muted);font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.06em;margin-top:2px}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
+  font-size:12.5px;font-weight:500}
+.ok{background:var(--ok-bg);color:var(--ok)} .warn{background:var(--warn-bg);color:var(--warn)}
+.bad{background:var(--bad-bg);color:var(--bad)} .unk{background:var(--unk-bg);color:var(--unk)}
+table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:14px}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
+td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.phase{border:1px solid var(--rule);border-radius:8px;background:var(--panel);
+  padding:14px 16px;margin:0 0 12px}
+.phase h3{margin:0 0 6px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.phase h3 em{font-style:normal;color:var(--muted);font-size:12.5px;font-weight:400}
+.chain{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;
+  color:var(--accent);margin:0 0 8px;word-break:break-word}
+.made{margin:0;color:var(--muted);font-size:13px}
+.made b{color:var(--fg);font-weight:500}
+.note{border-left:3px solid var(--rule);padding:2px 0 2px 14px;margin:0 0 14px;
+  color:var(--muted);font-size:13.5px}
+.empty{border:1px dashed var(--rule);border-radius:8px;padding:16px;color:var(--muted);
+  font-size:13.5px;background:var(--panel)}
+.narr p:last-child{margin-bottom:0}
+ul{margin:0 0 12px;padding-left:22px}
+.did{word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  font-size:12px;color:var(--muted)}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--unk-bg);
+  margin:6px 0 6px}
+.bar span{display:block;height:100%;min-width:3px}
+.bar .ok,.key.ok{background:var(--ok)} .bar .bad,.key.bad{background:var(--bad)}
+.bar .warn,.key.warn{background:var(--warn)} .bar .unk,.key.unk{background:var(--unk)}
+.legend{color:var(--muted);font-size:12.5px}
+.key{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 5px 0 0}
+.issue{margin:14px 0 4px}
+ul.ids{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
+  margin:0 0 8px;overflow-wrap:anywhere}
+details{margin:0 0 10px} summary{cursor:pointer;color:var(--accent);font-size:13.5px}
+footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--rule);
+  color:var(--muted);font-size:12.5px}
+</style>
+<div class="wrap">
+<h1>pygit.hitl.manifest.json</h1>
+<p class="sub">Computation (aggregate, emit) · &lt;1 s wall clock</p>
+<div class="strip">
+<div><b>46</b><span>statements</span></div>
+<div><b>20</b><span>blobs</span></div>
+<div><b>1</b><span>signers</span></div>
+<div><b>2</b><span>steps</span></div>
+<div><b>0</b><span>orphaned blobs</span></div>
+</div>
+<div class="pills">
+<span class="pill ok">statements: 22/22 verified</span>
+<span class="pill ok">credentials: 24/24 valid</span>
+<span class="pill ok">content: 20/20 verified</span>
+<span class="pill unk">execution environment: no hardware evidence</span>
+</div>
+<p class="gen">Generated 2026-09-25 19:10:31Z from manifest version 3 by <code>eqty-manifest/report.py</code>.</p>
+<h2>What this run was</h2>
+<div class="narr"><p>This manifest records a <strong>git push over HTTP</strong>: four git objects were packed into a packfile and sent to a git <code>receive-pack</code> endpoint, which accepted the update to <code>refs/heads/master</code>.</p>
+<p>It has two computation steps. Both are operated and signed by the same key (<code>did:key:z6MkgmHN…1Xpt</code>), and all 46 statements carry the same timestamp, 2026-09-25T19:06:08Z.</p>
+<p><strong>Step 1: &quot;Pack missing objects&quot;</strong> (<code>computation_type: aggregate</code>, <code>object_count: 4</code>). Its inputs are the source text of a Python function registered as Code asset <code>create_pack</code>, and four Binary assets labelled &quot;Loose object&quot; followed by a SHA-1: <code>508ceb25…cef4</code>, <code>ae00a8bb…f111</code>, <code>bc8a5d61…0cdd</code> and <code>ecf45c5d…5faf</code>. Its one output is a 323-byte Binary asset labelled &quot;Packfile&quot;. The packfile&#x27;s first bytes (<code>5041434b 00000002 00000004</code>) spell <code>PACK</code>, version 2, 4 objects, which matches <code>object_count: 4</code>.</p>
+<p><strong>Step 2: &quot;POST pack to git-receive-pack&quot;</strong> (<code>computation_type: emit</code>). Its metadata gives the target URL <code>http://127.0.0.1:51926/remote.git/git-receive-pack</code>, a loopback address, with <code>old</code> = forty zeros and <code>new</code> = <code>508ceb25d9126b53d07b8c34da45ae546e53cef4</code>. It has three inputs: the source of a function registered as Code asset <code>push</code>, a Document labelled &quot;receive-pack ref-update command&quot;, and the same Packfile CID that step 1 produced. The command&#x27;s text is <code>0000…0000 508ceb25…cef4 refs/heads/master</code> with the <code>report-status</code> capability. In the recorded <code>push</code> source, forty zeros is the value it sends when there is no remote master hash. So the update creates <code>master</code> on the remote instead of moving it. The new master value is also the name of one of the four loose objects packed in step 1.</p>
+<p><strong>Outcome.</strong> The output of step 2 is a Document labelled &quot;receive-pack report-status&quot; that reads <code>unpack ok</code> / <code>ok refs/heads/master</code>. As recorded, the remote unpacked the packfile and accepted the ref update.</p>
+<p><strong>Lineage.</strong> The two steps are linked by one shared CID: the Packfile is step 1&#x27;s output and one of step 2&#x27;s inputs. No statement records how the four loose objects were chosen or created, or a step before step 1. The <code>push</code> source refers to finding local and remote master hashes and missing objects, but none of that appears as a computation in this manifest. The Packfile&#x27;s DataRegistration and its MetadataRegistration each carry two credentials. Every other registration carries one.</p>
+<p><strong>What the checks do and do not show.</strong> All 22 registrations verify against their credentials, all 24 credentials are signed by the one DID that registered them, and all 20 blobs hash to their CIDs. So the record is intact and was signed by that key. Neither step claims an execution environment (<code>executedOn</code> is absent), so nothing here attests to the hardware or platform. The Code blobs are what the signer registered as the functions&#x27; source. The manifest does not prove that this code is what executed. The key is a bare <code>did:key</code> with no identity metadata, so the manifest does not say who controls it.</p></div>
+<table><tbody>
+<tr><th>Kind</th><td>Computation (aggregate, emit)</td></tr>
+<tr><th>Started</th><td>2026-09-25T19:06:08Z</td></tr>
+<tr><th>Ended</th><td>2026-09-25T19:06:08Z</td></tr>
+<tr><th>Wall clock</th><td>&lt;1 s</td></tr>
+<tr><th>Statement types</th><td>24 CredentialRegistration, 11 MetadataRegistration, 9 DataRegistration, 2 ComputationRegistration</td></tr>
+</tbody></table>
+<h2>Verification summary</h2>
+<p class="note">The same block <code>summary.py</code> prints, computed once from this manifest. Checks fail independently and are never merged into one verdict; a check that could not run says <em>not checked</em>, never passes.</p>
+<div class="scroll"><table><thead><tr><th>Statement type</th><th class="num">Verified</th><th class="num">Total</th><th>Result</th></tr></thead><tbody>
+<tr><td>MetadataRegistration</td><td class='num'>11</td><td class='num'>11</td><td><span class="pill ok">all verified</span></td></tr>
+<tr><td>DataRegistration</td><td class='num'>9</td><td class='num'>9</td><td><span class="pill ok">all verified</span></td></tr>
+<tr><td>ComputationRegistration</td><td class='num'>2</td><td class='num'>2</td><td><span class="pill ok">all verified</span></td></tr>
+</tbody></table></div>
+<p><span class="pill ok">no problems found</span></p>
+<h3>Signers</h3>
+<div class="scroll"><table><thead><tr><th>Signing DID</th><th class="num">Valid</th><th class="num">Total</th><th>Result</th></tr></thead><tbody>
+<tr><td class='did'>did:key:z6MkgmHNqBkeNeXQhXTmXBHryGjiQkag7GVgaQmC9eqZ1Xpt</td><td class='num'>24</td><td class='num'>24</td><td><span class="pill ok">all valid</span></td></tr>
+</tbody></table></div>
+<p><span class="pill ok">24/24 credentials: issuer is the registration&#x27;s signer</span></p>
+<h3>Hashes</h3>
+<p>20 hashes · 20 have pre-images attached · <strong>20 / 20 verified</strong></p>
+<div class="bar" role="img" aria-label="20 verified"><span class="ok" style="width:100.000%" title="20 verified"></span></div><p class="legend"><span class="key ok"></span>20 verified</p>
+<h3>Execution environments — claims</h3>
+<p class="empty">No step in this manifest declares an <code>executedOn</code> environment. That is not the same as running somewhere untrusted, and it is not the same as attested: the manifest simply asserts nothing about where these steps ran.</p>
+<h2>Participants</h2>
+<div class="scroll"><table><thead><tr><th>Role</th><th>Identity</th><th class='num'>Statements</th><th class='num'>Steps</th><th>Signed</th></tr></thead><tbody>
+<tr><td>signer</td><td class='did'>did:key:z6MkgmHNqBkeNeXQhXTmXBHryGjiQkag7GVgaQmC9eqZ1Xpt</td><td class='num'>46</td><td class='num'>2</td><td>POST pack to git-receive-pack, Pack missing objects</td></tr>
+</tbody></table></div>
+<p class="note">A single key signed every statement, so this manifest carries no separation of signing responsibility — one compromised key would account for all of it.</p>
+<h2>How the run unfolded</h2>
+<p class="note">2 steps grouped into 1 phase by contiguous timestamp clusters — this manifest declares no round/iteration field, so the grouping is derived, not stated.</p>
+<div class="phase"><h3><span>Segment 1</span><em>19:06:08 · 2 steps</em></h3>
+<p class="chain">Pack missing objects → POST pack to git-receive-pack</p>
+<p class="made">Run by <b>did:key:z6…</b></p>
+<p class="made">Produced <b>Packfile</b>, <b>receive-pack report-status</b></p>
+</div>
+<h2>Appendix — every step</h2>
+<div class="scroll"><table><thead><tr><th class="num">#</th><th>Time</th><th>Step</th><th>Type</th><th>Operator</th><th>Environment</th><th>Signed</th></tr></thead><tbody>
+<tr><td class='num'>1</td><td>19:06:08</td><td><strong>Pack missing objects</strong></td><td>aggregate</td><td>did:key:z6Mk…</td><td>none claimed</td><td>✓</td></tr>
+<tr><td class='num'>2</td><td>19:06:08</td><td><strong>POST pack to git-receive-pack</strong></td><td>emit</td><td>did:key:z6Mk…</td><td>none claimed</td><td>✓</td></tr>
+</tbody></table></div>
+<p class="note">The <em>Signed</em> column reports the credential whose <code>credentialSubject.id</code> is that step. A dash means no credential names this statement directly — not that a check failed.</p>
+<h3>Inputs and outputs</h3>
+<div class="scroll"><table><thead><tr><th class="num">#</th><th>Step</th><th>In</th><th>Out</th></tr></thead><tbody>
+<tr><td class='num'>1</td><td><strong>Pack missing objects</strong></td><td>create_pack<br>Loose object 508ceb25d9126b53d07b8c34da45ae546e53cef4<br>Loose object ae00a8bb6d207781ea189a4fb85b0324df42f111<br>Loose object bc8a5d61de7204d76cc4ba80bccbbb4fd2be0cdd<br>Loose object ecf45c5d65c29146a5bbbecb4910cee0f6125faf</td><td>Packfile</td></tr>
+<tr><td class='num'>2</td><td><strong>POST pack to git-receive-pack</strong></td><td>push<br>receive-pack ref-update command<br>Packfile</td><td>receive-pack report-status</td></tr>
+</tbody></table></div>
+<footer>Self-contained report — no external assets, no scripts, no network access. Every figure above was computed from <code>pygit.hitl.manifest.json</code> at generation time; nothing is transcribed from a conversation.</footer>
+</div>

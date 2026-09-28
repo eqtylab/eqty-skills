@@ -62,7 +62,7 @@ PROGRAM = ("**Program:** the repository in `./repo/` (relative to your working d
 
 OUTPUT = """**Output:** write a single Markdown file to `./{name}` containing, in this order:
 1. One line starting `Run:` — {run_rule}
-2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. "`_cast()` — turn the return value into bytes".
+2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. "_cast() — turn the return value into bytes". Write every node label and every edge label in double quotes (`A["…"]`, `A -->|"…"| B`) and use no backticks inside the diagram.
 3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every "where it lives" must name real code.
 {tail}
 The deliverable is a drawn diagram, not an essay. No other prose."""

@@ -92,10 +92,13 @@ If the user explicitly asks for one of the intermediates — "give me the
 timeline as a text file" — give it to them. That is a request, not the
 default.
 
-## Trust questions: quote the summary block first
+## Trust questions and summaries: quote the summary block first
 
 For any question about trust — *was it tampered with, does it verify, who
-signed it, what hardware did it run on, can I rely on it* — do this, in order:
+signed it, what hardware did it run on, can I rely on it* — and for any request
+for **a summary** of a manifest ("show a summary", "summarize this manifest",
+"give me the summary"), do this, in order. The summary is `summary.py`'s block;
+a summary of what the run did comes after it, in step 3, never instead of it:
 
 1. Run `uv run <skill-dir>/summary.py <manifest>`, where `<skill-dir>` is this
    skill's own directory — the one holding this SKILL.md. Your agent shows its
@@ -104,8 +107,11 @@ signed it, what hardware did it run on, can I rely on it* — do this, in order:
 2. **Paste its output unchanged, in a code block, before any prose** — through
    its last line, including the *Execution environment* lines and the note under
    them. Do not rephrase it, reorder it, shorten it or pick lines out of it.
+   This holds even when your harness already shows command output to the user,
+   and even when your own instructions favour short answers: the block is the
+   answer's evidence, and a retelling of it is not.
 3. Then explain it in plain words. Every figure you mention must appear in the
-   block.
+   block. For a summary, add what the run did, from `parse_manifest.py timeline`.
 
 Three things the explanation must never do:
 
@@ -419,7 +425,11 @@ Users generally want one of:
   copied from what you ran in chat. It is also the **only** file to write:
   see "The report is the only file" above.
 - **A narrative summary** — "the agent was asked X, called tools A and B,
-  and answered Y" — built directly from the `timeline` output. Prefer this
+  and answered Y" — built directly from the `timeline` output. When the user
+  asks for "a summary", this goes after the pasted block (see "Trust questions
+  and summaries"). Any word about verification in a narrative — *verified*,
+  *intact*, *no tampering* — comes from that block; if you have not run
+  `summary.py`, say nothing was checked. Prefer this
   as the default response shape; don't dump raw CIDs or JSON at the user
   unless they ask for the underlying data. Answer in chat, or fold it into
   the report via `--narrative`; don't leave a `narrative.md` on disk.

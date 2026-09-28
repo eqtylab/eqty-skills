@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.1.9 — 2026-09-28
+
+- **eqty-manifest** — a request for "a summary" of a manifest now shows the
+  verification summary: the agent runs `summary.py`, pastes its block unchanged,
+  then says what the run did. Before, "show a summary" could get a prose account
+  with no checks run, and a trust answer could retell the block instead of
+  pasting it. The paste rule now holds even when the agent's harness already
+  shows command output or prefers short answers, and a narrative may call
+  something verified only on the block's word. Codex 0.158 and Claude Sonnet: 12
+  of 12 summary and check answers pasted the block exactly, up from 0 of 2
+  summaries on Codex.
+- This release also carries 0.1.8's eqty-instrument fix, which was not published
+  on its own.
+
+## 0.1.8 — 2026-09-27
+
+- **eqty-instrument** — the L1 and L2 CFG agents now write every Mermaid node and
+  edge label in double quotes, with no backticks, so the diagrams render. The
+  label example in the prompt was itself a quote followed by a backtick
+  (`"`_cast()` — …"`), which Mermaid reads as an unclosed markdown string; it no
+  longer has backticks. On llama, with the purpose-paragraph L1 message, 4/8
+  diagrams rendered before and 8/8 after (Mermaid 11.4.1), with boxes, coverage
+  and run-to-run agreement unchanged. L2 was not re-tested.
+
 ## 0.1.7 — 2026-09-26
 
 - **eqty-manifest** — key binding is now checked on Intel TDX and NVIDIA reports
