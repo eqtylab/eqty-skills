@@ -5,7 +5,7 @@
   "plugins": [
     {
       "name": "eqty-skills",
-      "source": "./",
+      "source": "./plugins/eqty-skills",
       "description": "eqty-manifest (read, verify, report on an EQTY lineage manifest) and eqty-instrument (make a repo emit one)."
     }
   ]

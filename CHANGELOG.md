@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.10 — 2026-09-28
+
+- **Installs carry only what the agent uses.** The plugin now lives in
+  `plugins/eqty-skills/`, and both marketplaces point there, so an install copies
+  the two skills, the plugin manifests, `LICENSE` and `NOTICE`: about 0.6 MB, down
+  from 9.4 MB. Before, the plugin was the repository root and every install
+  copied all of it.
+- **Examples moved to the repository root**, in `examples/`, linked from the
+  README. No skill step or script used them; they are for people. The
+  eqty-instrument overview moved from the skill folder to
+  `docs/eqty-instrument.md`, and eqty-manifest's five-line README went.
+- Manual installs copy the skills from `plugins/eqty-skills/`; see the README.
+  Plugin installs update as usual.
+
 ## 0.1.9 — 2026-09-28
 
 - **eqty-manifest** — a request for "a summary" of a manifest now shows the

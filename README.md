@@ -31,8 +31,9 @@ codex plugin marketplace add eqtylab/eqty-skills
 codex plugin add eqty-skills@eqty-lab
 ```
 
-**Manually** — copy both skill directories into a skills folder, side by side
-(`eqty-instrument` calls `eqty-manifest` as its sibling):
+**Manually** — copy both skill directories from `plugins/eqty-skills/` into a
+skills folder, side by side (`eqty-instrument` calls `eqty-manifest` as its
+sibling):
 
 | Agent | For you, in every project | For one project |
 |---|---|---|
@@ -40,19 +41,22 @@ codex plugin add eqty-skills@eqty-lab
 | Codex | `~/.agents/skills/` | `.agents/skills/` |
 
 ```sh
-cp -R eqty-manifest eqty-instrument ~/.claude/skills/    # or ~/.agents/skills/ for Codex
+cp -R plugins/eqty-skills/eqty-manifest plugins/eqty-skills/eqty-instrument ~/.claude/skills/    # or ~/.agents/skills/ for Codex
 ```
 
 Each skill is self-contained: its directory carries everything its `SKILL.md`
 tells an agent to read or run, and refers to its own files relative to that
-directory.
+directory. An install copies `plugins/eqty-skills/` and nothing else: the two
+skills, the plugin manifests, `LICENSE` and `NOTICE`. The rest of this
+repository ([`examples/`](examples/), [`docs/`](docs/), this README) is for people
+and is never installed.
 
 ## Requirements
 
 - **Python 3.10+.**
 - **`eqty-manifest`** needs `eqty-sdk`, `cryptography` and `base58` to verify.
   With [uv](https://docs.astral.sh/uv/), `uv run` installs them per script;
-  otherwise `pip install -r eqty-manifest/requirements.txt`. Without them the
+  otherwise `pip install -r plugins/eqty-skills/eqty-manifest/requirements.txt`. Without them the
   scripts still parse and report, and every check they cannot run says
   *not checked* — never a pass.
 - **`eqty-instrument`** needs nothing installed to run: its scripts
@@ -68,11 +72,11 @@ Both skills build on the open-source EQTY SDK (`eqty_sdk`):
 
 ## Try it
 
-A real manifest ships with the examples. Verify it:
+A real manifest comes with the examples. Verify it:
 
 ```sh
-uv run eqty-manifest/summary.py \
-  eqty-instrument/examples/mode1/deepagent/research_agent/research_agent_manifest.json
+uv run plugins/eqty-skills/eqty-manifest/summary.py \
+  examples/mode1/deepagent/research_agent/research_agent_manifest.json
 ```
 
 ```
@@ -108,8 +112,16 @@ Or ask Claude about it — *"what does this manifest show?"* — and
   **auto** or **human-in-the-loop** node selection, and only then does it touch
   code. `check_graph.py` checks the result.
 
-`eqty-instrument/examples/` holds real runs of both: each changed file as
-`*_before.py` and `*_after.py`, with `changes.diff` between them.
+## Examples
+
+[`examples/`](examples/) holds real runs of both modes, for people to read; the
+agent does not use them. Each changed file is there as `*_before.py` and
+`*_after.py`, with `changes.diff` between them. The Mode 2 runs (pygit and llama,
+auto and HITL) also carry the control-flow graph both modes selected from
+(`cfg.html`, with `cfg.isolation.json` showing its agents were isolated), the
+node selection and placement notes, the emitted manifest, and the
+`eqty-manifest` report on it. More on the skill in
+[`docs/eqty-instrument.md`](docs/eqty-instrument.md).
 
 ## Known limitations
 
@@ -118,5 +130,5 @@ See [`LIMITATIONS.md`](LIMITATIONS.md).
 ## License
 
 Apache License 2.0 — see [`LICENSE`](LICENSE). Third-party material under
-`eqty-instrument/references/upstream/` and `eqty-instrument/examples/` carries
-its own license beside it; see [`NOTICE`](NOTICE).
+`plugins/eqty-skills/eqty-instrument/references/upstream/` and `examples/`
+carries its own license beside it; see [`NOTICE`](NOTICE).

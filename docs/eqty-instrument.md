@@ -2,11 +2,13 @@
 
 The **write** side: take a repo that knows nothing about EQTY and produce a patch
 that makes it emit a signed, content-addressed record of what ran. The read side —
-verifying and reporting on a manifest that already exists — is `eqty-manifest/`,
+verifying and reporting on a manifest that already exists — is `eqty-manifest`,
 and this skill hands off to it.
 
-`SKILL.md` is the entry point and the thing an agent loads. This file is for
-someone opening the directory.
+The skill lives in [`plugins/eqty-skills/eqty-instrument/`](../plugins/eqty-skills/eqty-instrument/);
+its `SKILL.md` is the entry point and the thing an agent loads. This page is for
+people, and is not installed. Real runs of both modes are in
+[`examples/`](../examples/).
 
 ## Two modes
 
@@ -25,7 +27,7 @@ Detection is per module, not per repo — a real codebase is LangGraph in one pl
 and plain Python everywhere else, so a module matching nothing is reported as a
 Mode 2 candidate, not a failure.
 
-## Layout
+## Layout of `plugins/eqty-skills/eqty-instrument/`
 
 | Path | What it is |
 |---|---|
@@ -38,11 +40,9 @@ Mode 2 candidate, not a failure.
 | `detect.py` | stdlib-only AST scan → JSON edit plan and human summary |
 | `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
 | `isolated_cfg.py` | Mode 2 step 1: runs the CFG agents as fresh, isolated processes and checks nothing leaked |
-| `examples/mode1/` | four real Mode 1 runs on stripped `eqty-lineage` examples — before, after, diff |
-| `examples/mode2/` | pygit and llama, auto and HITL — CFG, before, after, diff, manifest, node selection, placement and review doc, and the `eqty-manifest` report |
 
 The regression suite, its fixtures, the instrumented fixtures and the manifest they
-emitted live outside the skill, in the repo's `tests/eqty-instrument/`. Inside the
+emitted live outside the skill, in the development repo's `tests/eqty-instrument/`. Inside the
 skill folder they would be dead weight: they cannot run without this repo, so they
 would ship only to fail. The suite is for developing the skill, not for using it: its run half needs this
 repo's `.venv` and the companion `eqty-manifest` skill beside this one.
@@ -50,14 +50,16 @@ repo's `.venv` and the companion `eqty-manifest` skill beside this one.
 ## Running it
 
 ```sh
-python3 eqty-instrument/detect.py <path>          # human summary
-python3 eqty-instrument/detect.py <path> --json   # the edit plan
+python3 plugins/eqty-skills/eqty-instrument/detect.py <path>          # human summary
+python3 plugins/eqty-skills/eqty-instrument/detect.py <path> --json   # the edit plan
 ```
 
 Exit codes are the point: `0` a plan was produced, `1` Mode 1 applies but there is
 no attachable call site, `2` no Mode 1 modules — everything is a Mode 2 candidate.
 "Cannot be instrumented" has to be loud, because an empty plan otherwise looks
 exactly like a repo that needed no changes.
+
+In the development repo:
 
 ```sh
 .venv/bin/python tests/eqty-instrument/run_tests.py

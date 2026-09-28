@@ -1,0 +1,10 @@
+EQTY Skills
+Copyright 2026 EQTY Lab
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It includes third-party material under its own license, kept beside it:
+
+- eqty-instrument/references/upstream/
+  Copied verbatim from eqtylab/eqty-lineage (commit 35b65dae), Copyright 2026
+  EQTY Lab, Apache License 2.0.
+  License: eqty-instrument/references/upstream/LICENSE
