@@ -57,6 +57,8 @@ KEY_BINDING_GAP = ("Key binding (report key material -> claimed DID) is checked 
                    "evidence declares the DID's key (userData type \"key\"); where it reads not "
                    "checked, the commitment rule is defined in EQTY's vcomp code and integrity-py "
                    "does not expose it.")
+# Printed whenever a report verified, so an answer can quote what that means.
+HARDWARE_NOTE = "Verified hardware evidence means genuine hardware holding the signing key."
 SEVERITY = {"failed": 0, "unchecked": 1, "missing": 2}
 # Evidence where no check could run at all, in words that cannot be mistaken
 # for evidence that is present but could not be checked.
@@ -488,6 +490,8 @@ def render_text(s, full=False):
                 continue
             L.append("- %s: report signature %s · vendor chain %s%s · key binding %s"
                      % (i["label"], _state(i["signature"]), chain, binding, key))
+        if any(i["signature"] is True for i in h["items"]):
+            L.append("  " + HARDWARE_NOTE)
         if any(i["key_binding"] is None for i in h["items"]):
             L.append("  " + KEY_BINDING_GAP)
     return "\n".join(L)

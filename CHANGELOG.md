@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.11 — 2026-09-28
+
+- **eqty-manifest** — when a hardware report verifies, the summary block's
+  *Execution environment* lines end with a note: "Verified hardware evidence
+  means genuine hardware holding the signing key." Agents quote it instead of
+  paraphrasing what a verified report means. Manifests with no verified report
+  are unchanged.
+
 ## 0.1.10 — 2026-09-28
 
 - **Installs carry only what the agent uses.** The plugin now lives in
