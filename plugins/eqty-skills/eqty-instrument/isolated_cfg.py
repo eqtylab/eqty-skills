@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """isolated_cfg.py — Mode 2 step 1: draw the CFG with fresh, isolated agents.
 
-    python3 <skill-dir>/isolated_cfg.py <target-repo> --out <dir> [--agent claude|codex] [--model M] [--run "<user's run>"]
+    python3 <skill-dir>/isolated_cfg.py <target-repo> --out <dir> [--agent claude|codex] [--model M] [--path "<the path the user named>"]
 
 The orchestrator never draws the CFG and never dispatches it as an in-session
 subagent: a subagent inherits the session's context — the repo path, git status,
@@ -10,7 +10,7 @@ this skill's own description of what the diagram is for. This script launches
 each level as a separate process that sees only its prompt and a copy of the
 target, in a neutral temp directory outside any git repo (no git status, no commit
 history, no project instructions, no project memory). L1 runs first; L2 is a
-second fresh process given L1's diagram and L1's `Run:` line, carried verbatim —
+second fresh process given L1's diagram and L1's `Path:` line, carried verbatim —
 the only thing that flows from one level to the next.
 
 `--agent claude` (the default when `claude` is on PATH) runs `claude -p` with
@@ -58,18 +58,19 @@ L2_PROMPT = ("Go one level deeper — show the major functions and the branches 
 
 PROGRAM = ("**Program:** the repository in `./repo/` (relative to your working directory). "
            "Read only files in that directory{extra}. Do not read any other files, do not browse "
-           "the web, and do not install anything.")
+           "the web, do not install anything, and do not run any of the program's code or any "
+           "interpreter: read the files.")
 
 OUTPUT = """**Output:** write a single Markdown file to `./{name}` containing, in this order:
-1. One line starting `Run:` — {run_rule}
+1. One line starting `Path:` — {path_rule}
 2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. "_cast() — turn the return value into bytes". Write every node label and every edge label in double quotes (`A["…"]`, `A -->|"…"| B`) and use no backticks inside the diagram.
 3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every "where it lives" must name real code.
 {tail}
 The deliverable is a drawn diagram, not an essay. No other prose."""
 
-L1_RUN_RULE = ("which run of the program you diagrammed: which file or function starts it and, if the "
-               "program offers several commands or entry points, the command sequence. Choose it yourself from the code.")
-L2_RUN_RULE = "the same `Run:` line as the high-level diagram, verbatim."
+L1_PATH_RULE = ("which path through the program you diagrammed: which file or function starts it and, if the "
+                "program offers several commands or entry points, the command sequence. Choose it yourself from the code.")
+L2_PATH_RULE = "the same `Path:` line as the high-level diagram, verbatim."
 
 # Words that would tell a CFG agent what the diagram is for. None may appear in a prompt.
 LEAK_WORDS = re.compile(r"eqty|lineage|provenance|manifest|instrument|attest|\bsdk\b|audit", re.I)
@@ -181,6 +182,9 @@ def command_escapes(command, workdir):
         return "parent directory"
     if re.search(r"\b(?:curl|wget|ssh|scp|nc|pip3?|npm|uv|git)\b", body):
         return "network or install command"
+    if re.search(r"(?:^|[;&|(]\s*|['\"]\s*)(?:python[\d.]*|pytest|ipython|jupyter|node|ruby|perl|make|poetry|pdm|hatch|tox"
+                 r"|conda|sh|bash|zsh|\./\S+)(?=[\s'\"]|$)", body):
+        return "runs code (the skill never runs the target)"
     return None
 
 
@@ -210,7 +214,7 @@ def check_run_codex(level, workdir, prompt, events, out_name):
         "only_expected_event_items": not unexpected,
         "every_tool_call_inside_workdir": not outside,
         "agent_succeeded": any(e.get("type") == "turn.completed" for e in events) and not failed,
-        "output_has_run_line": first.startswith("Run:"),
+        "output_has_path_line": first.startswith("Path:"),
         "output_has_mermaid": "```mermaid" in text,
     }
     return {
@@ -253,7 +257,7 @@ def check_run(level, workdir, prompt, events, out_name, agent="claude"):
         "tools_limited": set(init.get("tools", [])) <= {"Read", "Write", "Glob", "Grep"},
         "every_tool_call_inside_workdir": not outside,
         "agent_succeeded": result.get("subtype") == "success" and not result.get("is_error"),
-        "output_has_run_line": first.startswith("Run:"),
+        "output_has_path_line": first.startswith("Path:"),
         "output_has_mermaid": "```mermaid" in text,
     }
     return {
@@ -283,7 +287,7 @@ def main():
     ap.add_argument("--agent", choices=AGENTS,
                     help="which CLI starts the agents (default: claude if on PATH, else codex)")
     ap.add_argument("--model", help="model for both agents (default: the CLI's default)")
-    ap.add_argument("--run", help="the run the user asked for; replaces L1's own choice")
+    ap.add_argument("--path", help="the path through the program the user named; replaces L1's own choice")
     ap.add_argument("--keep", action="store_true", help="keep the temp workdirs")
     args = ap.parse_args()
 
@@ -301,9 +305,9 @@ def main():
     # L1
     l1_dir = os.path.join(base, "l1")
     copy_repo(repo, os.path.join(l1_dir, "repo"))
-    run_rule = (f"exactly this line: `Run: {args.run}`" if args.run else L1_RUN_RULE)
+    path_rule = (f"exactly this line: `Path: {args.path}`" if args.path else L1_PATH_RULE)
     l1_prompt = "\n\n".join([L1_PROMPT, PROGRAM.format(extra=""), "**Budget:** about 9 boxes.",
-                             OUTPUT.format(name="L1.md", run_rule=run_rule,
+                             OUTPUT.format(name="L1.md", path_rule=path_rule,
                                            tail="4. Under a heading `## Other entry points`, list the runnable entry points or paths your diagram does not cover.\n")])
     code, events, err = run(l1_dir, l1_prompt, args.model)
     l1_report, l1_text = check_run("L1", l1_dir, l1_prompt, events, "L1.md", agent)
@@ -312,24 +316,24 @@ def main():
         json.dump(report, open(os.path.join(args.out, "isolation.json"), "w"), indent=2)
         sys.exit(f"isolated_cfg: L1 failed its isolation or output checks; see {args.out}/isolation.json\n{err[-2000:]}")
     open(os.path.join(args.out, "L1.md"), "w").write(l1_text)
-    run_line = next(l for l in l1_text.splitlines() if l.strip())
+    path_line = next(l for l in l1_text.splitlines() if l.strip())
 
-    # L2 — a second fresh process; gets L1's diagram and Run line, nothing else.
+    # L2 — a second fresh process; gets L1's diagram and Path line, nothing else.
     l2_dir = os.path.join(base, "l2")
     copy_repo(repo, os.path.join(l2_dir, "repo"))
     open(os.path.join(l2_dir, "L1.md"), "w").write(l1_text)
     l2_prompt = "\n\n".join([
         L2_PROMPT,
         PROGRAM.format(extra=", plus `./L1.md`"),
-        f"**One level up:** the high-level diagram for this program is `./L1.md`. Go one level deeper than that, on the same run:\n\n{run_line}",
+        f"**One level up:** the high-level diagram for this program is `./L1.md`. Go one level deeper than that, on the same path:\n\n{path_line}",
         "**What a box is:** a major function, or a branch between major functions. Individual statements are not boxes; if a box would be one line of code, it belongs inside its caller. Draw branches as decision nodes with labelled edges.",
         "**Budget:** about 30 boxes.",
-        OUTPUT.format(name="L2.md", run_rule=L2_RUN_RULE, tail=""),
+        OUTPUT.format(name="L2.md", path_rule=L2_PATH_RULE, tail=""),
     ])
     code, events, err = run(l2_dir, l2_prompt, args.model)
     l2_report, l2_text = check_run("L2", l2_dir, l2_prompt, events, "L2.md", agent)
-    l2_report["checks"]["run_line_carried_verbatim"] = next(
-        (l for l in l2_text.splitlines() if l.strip()), "") == run_line
+    l2_report["checks"]["path_line_carried_verbatim"] = next(
+        (l for l in l2_text.splitlines() if l.strip()), "") == path_line
     l2_report["passed"] = all(l2_report["checks"].values())
     report["levels"].append(l2_report | {"prompt": l2_prompt})
     json.dump(report, open(os.path.join(args.out, "isolation.json"), "w"), indent=2)

@@ -1,90 +1,79 @@
-# pygit — step 3 node selection (auto)
+# pygit — node selection (auto)
 
-Written before any code was touched. Mode: **auto** (chosen by the user at step 2).
+**Path:** `pygit.py` `__main__` block, command sequence `init myrepo`, then (in
+`myrepo`) `add FILE...`, `commit -m MSG`, `push GIT_URL`. Given with `--path` (then
+called `--run`, which is why the CFG's first line reads `Run:`): the sequence L1
+chose from the code in the earlier version of this example, kept so the two
+versions describe the same path. Mode: **auto**.
 
-## The run
+**Not part of this path** (`../merged.md`): `cat_file`, `diff`, `get_status`,
+`ls_files` and `status`, the other commands. They get no nodes; they still pass
+through the SDK set-up, and any instrumented function they call records.
 
-As L1 stated it, carried to L2 verbatim (it came from L1, not from the user or from me):
+## CFG boxes → lineage nodes
 
-> Run: `pygit.py` `__main__` block, command sequence `init myrepo` → (cd myrepo) `add FILE...` → `commit -m MSG` → `push GIT_URL` (the create-repo-and-push-to-GitHub workflow from the README).
+Every L2 box is accounted for. Data-flow facts are from `../merged.md`.
 
-Other runnable paths through the repo. These are **not instrumented** as runs: they get no nodes of their own. They do still pass through the SDK setup, and an instrumented function they call still records.
+| L2 box(es) | Archetype (mode2ideas) | Decision | Why |
+|---|---|---|---|
+| A `__main__` dispatch | CLI parsing | **no node** | Never: CLI parsing. SDK set-up and export happen at module level, before dispatch. |
+| B `init()` | **Emit** | **NODE 1** | Writes the repository skeleton and `HEAD` to disk. |
+| C `add()` | **Ingest** (Tier 1) | **NODE 2** | The working-tree files enter here: the provenance floor. |
+| R `read_index()` | accessor | fold | Reads `.git/index`; the index is hashed where `add` and `commit` use it. |
+| D `hash_object()` | loop body | fold | Called per object (`merged.md`: loop body); the object files it writes are recorded by `add` and `commit` as their outputs. |
+| E `write_index()` | Transform, one caller | fold into NODE 2 | Its `.git/index` is `add`'s output. The data flow finds `write_index` → `read_index` via `.git/index`, which is the edge `add` → `commit`. |
+| F `commit()` | **Transform**, the named stage | **NODE 3** | *"Committed the index as a tree and a commit, moved master."* |
+| G `write_tree()` | Transform, one caller | fold into NODE 3 | The tree object is `commit`'s output. |
+| L `get_local_master_hash()` | accessor | fold | The master ref it reads is hashed by the readers, `commit` and `push`. The data flow finds `commit` → `push` via `.git/refs/heads/master`. |
+| M, M1 `get_remote_master_hash()` | **Ingest** (Tier 1, network) | **NODE 4** | The remote's state enters the process. |
+| N, N1 `find_missing_objects()` | selection, one caller | fold into NODE 6 | Its result is exactly the set of objects NODE 5 packs. |
+| K, T `find_commit_objects()`, `find_tree_objects()` | loop bodies | **no node** | Recursive walkers, below the stage level. |
+| CP `create_pack()` | **Aggregate** (Tier 1) | **NODE 5** | N objects → 1 pack: the one place the lineage fans in. |
+| EP `encode_pack_object()` | loop body | **no node** | Per object, inside `create_pack`. |
+| BD, X `build_lines_data()`, `extract_lines()` | pure | **no node** | No I/O. |
+| P `http_request()` | wrapper | **no node** | Wraps `urllib`, and carries the credentials. |
+| H, H1 `push()` | **Emit** (Tier 1) | **NODE 6** | The pack leaves the process; the remote's reply is the output. |
 
-- `pygit.py cat-file {commit|tree|blob|size|type|pretty} HASH` → `cat_file()`
-- `pygit.py hash-object PATH [-t TYPE] [-w]` → `hash_object()` on its own
-- `pygit.py ls-files [-s]` → `ls_files()`
-- `pygit.py status` → `status()` / `get_status()`
-- `pygit.py diff` → `diff()`
-- `import pygit` as a library. The same functions carry the same instrumentation, so a library call to `add`/`commit`/`push` records exactly as the CLI does, but no library run is exercised here.
+The merge's other cross-checks: `write_file`, `read_tree` and `find_object` have
+no box, and are I/O primitives inside the nodes above (no node). The commit and
+tree bytes that `commit` builds inline and hands to `hash_object` are recorded as
+`commit`'s object files.
 
-## Filtering pass (`references/mode2ideas.md`), box by box over L2
+Count test: six bullets — *initialised the repo; added the files; committed them;
+read the remote's master; packed the missing objects; pushed them.*
 
-| L2 box | Verdict | Why |
-|---|---|---|
-| M1 `__main__` parse, D1 dispatch | never | CLI parsing. SDK init and export go here, but as setup, not as a node |
-| IN `init()` | **NODE** — emit | writes the repo skeleton and `HEAD` to disk. Caption: *"initialised empty repository myrepo"* |
-| AD/AE `add()` | **NODE** — ingest | the working-tree files enter here. This is the provenance floor: the bytes the user typed |
-| RI `read_index()` | fold (no node) | reads internal state (the index), not the outside world. 5 callers, but it is an accessor over a file. The index hand-off it performs is recorded by the stages that read it (add, commit), which hash `.git/index` at the point they use it |
-| HO/HOd/HOW `hash_object()` | fold (no node) | per-object primitive, called inside add's per-path loop (a loop body below the stage level) and once each by write_tree/commit. Tie-breaker: parent and child both qualify → keep the parent. It is not Tier-1 Emit: the objects stay in the local store until push. The object files it writes are recorded by the parents (add, commit) as their outputs |
-| WI `write_index()` | fold into add | one caller; the file it writes is add's output |
-| CM/CT/CH `commit()` | **NODE** — transform | the named stage *"committed the index as a tree + commit, moved master"* |
-| WT `write_tree()` | fold into commit | Tier 2 transform, one caller → fold into the caller; the tree object is commit's output |
-| GL/GL2 `get_local_master_hash()`, CPd | never (accessor) | the ref-file hand-off it reads is hashed in the reading stage (commit for the parent, push for the local master) |
-| PU/HR2/OKd `push()` | **NODE** — emit | the artifact leaves the process: the pack is POSTed to the remote. Caption: *"pushed 4 objects to the remote, which replied unpack ok"* |
-| GR/GRd `get_remote_master_hash()` | **NODE** — ingest | the remote's state enters the process (network ingest, Tier 1). It is push's child and Tier 1, so both are kept and the nesting is deliberate |
-| HR `http_request()` | never | a wrapper around urllib (instrument the inner call, which is stdlib, so fold into the callers). It also carries the credentials |
-| EL `extract_lines()`, BL `build_lines_data()` | never | pure functions, no I/O |
-| FM/FMd `find_missing_objects()` | fold into push | Tier 2 selection with one caller. Its result is visible as exactly the set of objects create_pack's node takes as inputs |
-| FC/FCd/FT/FTd/RT/RO walkers and `read_object()` | never | recursive helpers and per-object reads, below the stage level |
-| CP `create_pack()` | **NODE** — aggregate | N objects → 1 pack, the one place the lineage genuinely fans in. Tier 1, kept alongside its parent push |
-| EP `encode_pack_object()` | never | per-object loop body inside create_pack |
+## The nodes
 
-**Six stages → nodes:** init, add, commit, get_remote_master_hash, create_pack, push. That passes the count test: it is the bullet list you would give a manager.
+| # | Node (`computation_type`) | Mechanism | Inputs recorded | Outputs recorded |
+|---|---|---|---|---|
+| 1 | `init` (emit) | `@compute`; returns an asset of the `HEAD` it wrote (no caller uses the `None`) | `Code(init)`; `repo` (path text) | `HEAD` |
+| 2 | `add` (ingest) | `@compute` for `Code` and the CLI input, plus a builder for the files | `Code(add)`; each file's bytes as read; the prior `.git/index` if any; `paths` (path text) | each blob object file; `.git/index` |
+| 3 | `commit` (transform) | `@compute` plus a builder | `Code(commit)`; `.git/index` as read; the parent master ref if any; `message` | tree object; commit object; `refs/heads/master`; the commit id |
+| 4 | `get_remote_master_hash` (ingest) | builder: `@compute` would capture `password` positionally | `Code(get_remote_master_hash)`; the info/refs URL | the ref advertisement; the remote master id, when the remote has one |
+| 5 | `create_pack` (aggregate) | builder: its argument is a `set` | `Code(create_pack)`; each object file packed | the pack bytes |
+| 6 | `push` (emit) | builder: it returns a `set`, which callers may use | `Code(push)`; the master ref as read; the remote master id when not `None`; the pack bytes | the receive-pack response |
 
-## Per-node placement plan (inputs, outputs, mechanism)
+Every builder takes its function's source (`references/eqtysdk.md` §6.11). In
+`add` and `commit`, `inspect.getsource` follows the decorator's `functools.wraps`
+to the original function, so the builder's `Code` is the same text `@compute`
+records: one node.
 
-The SDK constraints that shape placement are in `references/eqtysdk.md` §6.1–§6.4 and §6.10:
+**Unknowns** (`merged.md`), and how the patch avoids depending on them:
 
-- `@compute` sees only positional args.
-- `bytes` and `set` are rejected as inputs and outputs.
-- A `None` return raises.
+- `remote_sha1`'s type (pyright: a `str` or `None`, partly `Any`): recorded as text
+  when it is not `None`.
+- `objects`' type (`set[Unknown]`): not recorded as a value at all; `create_pack`
+  records the object files it packs.
+- `http_request`'s return: recorded as the response bytes.
 
-pygit hands data between stages through `.git/` files, so file hand-offs are recorded with a `Computation` builder **inside** the target function that reads or writes the file, per §6.10.
+## Gaps (reported, not fixed)
 
-| # | Stage (function in `pygit.py`) | Mechanism | Inputs recorded | Outputs recorded | computation_type |
-|---|---|---|---|---|---|
-| 1 | `init(repo)` | `@compute`. §6.10 None-return fix: return an asset of the `HEAD` file it just wrote (no caller uses the `None`) | Code(init), `repo` (path text → Custom, gap) | `HEAD` file bytes (Document) | emit |
-| 2a | `add(paths)` — builder inside | builder, hashing at the point of read/write | each working-tree file's bytes as read (Document per file), prior `.git/index` if one exists | each blob object file written, `.git/index` as written | ingest |
-| 2b | `add(paths)` — decorator | `@compute`. None-return fix: return the asset of `.git/index` it just wrote | Code(add), `paths` (list of path text → one Custom, gap) | `.git/index` (same CID as 2a) | ingest |
-| 3a | `commit(message, author=None)` — builder inside | builder | `.git/index` as read (edge from add), parent `refs/heads/master` if one exists | tree object file, commit object file, `refs/heads/master` as written, commit id text | transform |
-| 3b | `commit(...)` — decorator | `@compute`; return value unchanged (callers use the sha) | Code(commit), `message` (Custom; `author` is a kwarg so it is not captured) | commit id text (Custom, generated name — gap; same CID as in 3a) | transform |
-| 4 | `get_remote_master_hash(git_url, username, password)` | builder only: `@compute` would capture `password` positionally | the info/refs URL text (identifier, gap) | the response bytes received (Document); the remote master id text when the remote has one | ingest |
-| 5 | `create_pack(objects)` | builder only: its argument is a `set` (§6.10 row 3) | each object file packed (hashed from the object store, the files `encode_pack_object` reads) | the pack bytes (Binary) | aggregate |
-| 6 | `push(git_url, ...)` | builder only: it returns `(str\|None, set)`, and a `set` output raises (§6.10 row 2). Library callers may use the set, so the return value is not changed | `refs/heads/master` as read (edge from commit), the pack bytes it sends (edge from create_pack), the remote master id when not None (edge from 4) | the receive-pack response bytes (Document) | emit |
-
-The functions that have a builder but no decorator (4, 5, 6) carry no `Code` asset. That is a reported gap (ladder rung: builder inside the target function). Functions 2 and 3 carry both a decorator (`Code` + CLI inputs) and a builder (file content), so each appears as **two computations sharing an output**. That nesting is deliberate, and each shared output is reported as a multi-producer node.
-
-## Chaining (both modes chain)
-
-Edges that should form from data that really flows:
-
-- add → commit: `.git/index` bytes, written by add and read by commit.
-- add → create_pack: each blob object file.
-- commit → create_pack: tree and commit object files.
-- commit → push: `refs/heads/master` bytes.
-- create_pack → push: pack bytes.
-- 2a↔2b and 3a↔3b: shared outputs (index, commit id).
-
-**Predicted missing edge:** get_remote_master_hash → push exists only through the remote master id. The README workflow pushes to a fresh, empty remote, so the id is `None` and nothing flows. The ingest node is therefore its own component in this run. init's `HEAD` is never read by any later pygit step, so init is its own component too.
-
-## Prediction (written before the run)
-
-The example adds two distinct files.
-
-- **Computations: 8.** In registration order: init, add (builder), add (decorator), commit (builder), commit (decorator), get_remote_master_hash, create_pack, push.
-- **Connected components: 3.** They are `{init}`, `{get_remote_master_hash}` and one main chain `{add ×2, commit ×2, create_pack, push}`.
-- **Roots: 9.** The Code assets of init, add and commit; `repo`; `paths`; the two working files; `message`; the info/refs URL.
-- **Leaves: 4.** `HEAD`, the commit id, the info/refs response, and the receive-pack response.
-- **Multi-producer nodes: 2.** These are `.git/index` and the commit id.
-- **Cycles: 0.**
-- **Shape:** two singleton islands plus a DAG in which two working files fan into add. Add's index flows into commit. Blobs, tree and commit object fan into create_pack (4 → 1). The pack and the master ref fan into push, which ends at the remote's report.
+1. **Path and identifier text:** `repo`, `paths` and the info/refs URL commit to
+   their text, not to files (§6.7).
+2. **`author` is a keyword argument,** so `commit`'s decorator doesn't record it (§6.1).
+3. **Two computations each for `add` and `commit`,** sharing their outputs: the
+   index and the commit id each have two producers.
+4. **`init` is its own component:** nothing later reads `HEAD`.
+5. **On a first push to an empty remote,** `get_remote_master_hash` returns `None`,
+   so it hands nothing to `push` and is its own component too.
+6. **Credentials are never recorded;** the push URL is.

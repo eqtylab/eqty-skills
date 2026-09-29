@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.2.0 — 2026-09-29
+
+- **eqty-instrument never runs your code.** Not the program, its tests, its
+  examples or its imports, and it no longer asks you to run the patched program
+  or waits for a manifest: running it often needs a cloud deployment that isn't
+  there while you instrument. It hands over the patch and a `prediction.md`: the
+  command to run, the graph the manifest should show, the assumptions behind it,
+  and the checks to run once you have one. This is why the version is 0.2.0.
+- **Mode 2 reads the data flow from the source.** After the control-flow graph,
+  `static_flow.py` finds what each function hands to which, including through
+  files, typed by pyright (the skill asks to install it, and falls back to a
+  standard-library pass if you decline). `merge_flow.py` joins that with the CFG:
+  an annotated diagram, cross-checks (functions the path reaches with no box,
+  hand-offs it couldn't type) and a predicted manifest for every box. On a LoRA
+  training script, the static pass agreed with a runtime trace on 57 of 58 facts.
+- **Values `@compute` can't hash** (Hugging Face datasets, PEFT models,
+  tokenizers, sets, NumPy arrays and more) have a recipe each in
+  `references/eqtysdk.md` §6.11, and every hand-built node now records its
+  function's source as a `Code` input, as `@compute` does.
+- **Auto or HITL is asked only when someone can answer:** not when you already
+  said, and not in a non-interactive run.
+- The CFG agents are told not to run anything, and `isolated_cfg.py` flags a
+  command that would. The path through the program is now given with `--path`
+  (was `--run`), and the CFG's first line reads `Path:`.
+- **Examples:** a new `examples/mode2/lora_banking77/`, and pygit rebuilt in the
+  new flow, auto and HITL. The llama example is retired; it and the earlier
+  examples, with their manifests, are in the repository's history.
+
 ## 0.1.11 — 2026-09-28
 
 - **eqty-manifest** — when a hardware report verifies, the summary block's

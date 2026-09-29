@@ -584,6 +584,80 @@ What remains unrecordable is reported as a gap: path-text or identifier inputs,
 [Sources: decorator][decorator], [output conversion][compute], [serializer][assets],
 [builder][builder].
 
+### 6.11 Types `@compute` can't hash: recipes
+
+Most ML objects are rejected by §7.1: a `Dataset`'s `__dict__` and a model's
+`state_dict()` are not JSON. **Don't hash the object. Hash the bytes that stand
+for it,** inside the function, with the builder (§5, §6.10). `static_flow.py`
+prints the recipe id beside each hand-off it marks ✗.
+
+Four rules. The first three make the edges form; the fourth keeps the code:
+
+- **Same recipe on both sides.** The step that produces the value and the step
+  that consumes it must turn it into the same bytes, so the CIDs match.
+- **Producer registers, consumer adds the CID.** The producer registers a typed,
+  named asset (`Dataset.from_cid(cid, name=…)`). The consumer only calls
+  `add_input_cid(get_cid_for_bytes(…))`. A second registration would add a
+  second label, or a generated name.
+- **The bytes must be deterministic.** Same content, same bytes, in this process
+  and, where it matters, the next. A set is serialized sorted; pickle is never
+  the encoding.
+- **Every builder takes its function's source as a `Code` input.** `@compute`
+  records the decorated function's text (§6.0); a builder records nothing it isn't
+  given, so without this the manifest attests the data but not the code that ran.
+  One line, inline, right after `Computation.new(...)`:
+  `run.add_input_cid(sdk.Code.from_object(inspect.getsource(<function>), name="<function>", _store=True).cid)`.
+  Like `@compute`'s, it is the function's text including the instrumentation, not
+  a closure over what it calls.
+
+| Recipe | Recognise it by | Bytes to hash | Storage | Checked |
+|---|---|---|---|---|
+| `hf-dataset` | `datasets.Dataset`, a split of a `DatasetDict` | `split.to_parquet(buf)` into an `io.BytesIO`, then `get_cid_for_bytes(buf.getvalue(), _store=True)`. It includes shuffles and selections, which `cache_files` does not. | stored; by reference once a split is too big to copy | ✓ same bytes in two processes |
+| `hf-dataset-source` | the dataset as `load_dataset` returned it | each `split.cache_files[i]["filename"]` via `Dataset.from_path`. These are the Arrow files the library built from the hub's parquet, so they are what the program read. | by reference, `obtain_from` the hub id | ✓ |
+| `peft-model` | `peft.PeftModel` | `safetensors.torch.save(get_peft_model_state_dict(model))`: the adapter weights only, KBs for LoRA. Hash it before and after training: they are different versions, so different assets. | stored | ✓ same bytes within a run; LoRA init is random, so not across runs |
+| `hf-base-weights` | a model from `from_pretrained` | `huggingface_hub.try_to_load_from_cache(repo, "model.safetensors", revision=model.config._commit_hash)` via `Model.from_path`. For a sharded model, each shard listed in `model.safetensors.index.json`. | by reference, `obtain_from` `repo@commit` | ✓ single file; shards not exercised |
+| `torch-module` | any other `torch.nn.Module` | `safetensors.torch.save(model.state_dict())` while it is small. For a large model, hash only the files it is saved to, and report the in-memory edges as gaps. Tied weights make `save()` refuse the shared tensors. | by reference when heavy | not exercised |
+| `hf-tokenizer` | `transformers` tokenizer | `tokenizer.backend_tokenizer.to_str().encode()` for a fast tokenizer. For a slow one, its files from the cache. | stored | ✓ same bytes in two processes |
+| `hf-trainer` | `transformers.Trainer` | **Nothing: it's a container, not data.** Record what it carries, each by its own recipe: `trainer.model`, `trainer.args`, the dataset. | — | ✓ |
+| `hf-training-args` | `TrainingArguments` | `Configuration.from_object(json.loads(args.to_json_string()), _store=True)`. Check it for secrets before storing: it holds paths and hub settings. | stored | ✓ |
+| `config-with-sets` | a config whose `to_dict()` holds a set, e.g. `LoraConfig` | `json.loads(json.dumps(config.to_dict(), default=sorted))`, then `Configuration.from_object`. Sorted, because set order changes between processes. | stored | ✓ |
+| `numpy-array` | `numpy.ndarray` | `np.save(buf, arr)`: the header carries dtype and shape, which `arr.tobytes()` drops | stored, or by reference when heavy | not exercised |
+| `pandas-frame` | `pandas.DataFrame` | `df.to_parquet(buf)` | stored | not exercised |
+| `tuple-return` | a returned tuple of any of these | each element, by its own recipe, as a separate output | — | ✓ |
+| `set` / `bytes` | built-ins §7.1 rejects | a set as a sorted list; bytes straight to `get_cid_for_bytes` | stored | — |
+| `none-return` | an emitter that writes a file and returns `None` | the file it wrote, via `from_path`, after the write | stored unless heavy | ✓ |
+| `path-arg` | a parameter holding a path | the file's bytes at the point it is read or written (§6.7), never the path text | stored unless heavy | ✓ |
+
+The pattern, from the LoRA example (`examples/mode2/lora_banking77/` in the eqty-skills repository):
+
+```python
+def tokenize(split, tokenizer):
+    out = split.map(lambda b: tokenizer(b["text"], truncation=True, max_length=64), batched=True)
+    run = sdk.Computation.new(name="Tokenize", computation_type="transform", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(tokenize), name="tokenize",
+                                           _store=True).cid)   # its source, as @compute would
+    buf = io.BytesIO()
+    split.to_parquet(buf)                                   # consumer: the CID only
+    run.add_input_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True))
+    buf = io.BytesIO()
+    out.to_parquet(buf)                                     # producer: a typed, named asset
+    run.add_output_cid(sdk.Dataset.from_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True),
+                                            name=f"tokenized {len(out)} rows").cid)
+    run.finalize()
+    return out
+```
+
+When the recipes were written, that example was run once by hand during
+development (2026-09-28); the skill itself runs nothing. Uninstrumented, bare
+`@compute` raised on all seven of the script's functions. With these recipes it
+emitted one connected graph: 8 computations (`tokenize`
+runs twice), and 36 of its 39 hashes verified. The other three are declared by
+reference: the base weights and the two source splits.
+
+**Recommendation:** hashing a dataset or a model state costs a full
+serialization. Where that is too slow for real use, hash at the ingest and the
+emit only, and report the in-between edges as gaps rather than dropping them.
+
 ## 7. Reproducing content identifiers
 
 ### 7.1 `from_object()` is not universally JSON
@@ -779,10 +853,13 @@ Cryptographic validity, content availability, and workflow correctness are separ
 checks. Names, graph shape, and asset types can improve readability without proving
 that the recorded relationships match execution.
 
-**Recommended checks for an instrumented workflow:**
+**Recommended checks for an instrumented workflow.** The instrumenting skill
+never runs the target (SKILL.md), so these are worked on the manifest the user's
+own run emits:
 
 - [ ] Record the SDK version and relevant storage/context configuration.
-- [ ] Run the entry points whose behavior the instrumentation claims to cover.
+- [ ] The user has run the entry points whose behavior the instrumentation claims
+      to cover.
 - [ ] Inspect exported inputs/outputs and source against the actual work, including
       keyword arguments and implicit dependencies omitted by automatic capture.
 - [ ] Verify statement IDs and applicable credentials; bind each credential to the

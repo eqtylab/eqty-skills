@@ -1,0 +1,971 @@
+{
+  "entry": "pygit.py",
+  "types_from": "pyright 1.1.414 and the catalogue; environment: none needed (pygit uses only the standard library)",
+  "functions": [
+    {
+      "name": "add",
+      "file": "pygit.py",
+      "lines": [
+        249,
+        265
+      ],
+      "reached": true
+    },
+    {
+      "name": "build_lines_data",
+      "file": "pygit.py",
+      "lines": [
+        338,
+        346
+      ],
+      "reached": true
+    },
+    {
+      "name": "cat_file",
+      "file": "pygit.py",
+      "lines": [
+        99,
+        126
+      ],
+      "reached": true
+    },
+    {
+      "name": "commit",
+      "file": "pygit.py",
+      "lines": [
+        289,
+        318
+      ],
+      "reached": true
+    },
+    {
+      "name": "create_pack",
+      "file": "pygit.py",
+      "lines": [
+        459,
+        468
+      ],
+      "reached": true
+    },
+    {
+      "name": "diff",
+      "file": "pygit.py",
+      "lines": [
+        210,
+        228
+      ],
+      "reached": true
+    },
+    {
+      "name": "encode_pack_object",
+      "file": "pygit.py",
+      "lines": [
+        441,
+        456
+      ],
+      "reached": true
+    },
+    {
+      "name": "extract_lines",
+      "file": "pygit.py",
+      "lines": [
+        321,
+        335
+      ],
+      "reached": true
+    },
+    {
+      "name": "find_commit_objects",
+      "file": "pygit.py",
+      "lines": [
+        414,
+        427
+      ],
+      "reached": true
+    },
+    {
+      "name": "find_missing_objects",
+      "file": "pygit.py",
+      "lines": [
+        430,
+        438
+      ],
+      "reached": true
+    },
+    {
+      "name": "find_object",
+      "file": "pygit.py",
+      "lines": [
+        65,
+        80
+      ],
+      "reached": true
+    },
+    {
+      "name": "find_tree_objects",
+      "file": "pygit.py",
+      "lines": [
+        401,
+        411
+      ],
+      "reached": true
+    },
+    {
+      "name": "get_local_master_hash",
+      "file": "pygit.py",
+      "lines": [
+        280,
+        286
+      ],
+      "reached": true
+    },
+    {
+      "name": "get_remote_master_hash",
+      "file": "pygit.py",
+      "lines": [
+        361,
+        375
+      ],
+      "reached": true
+    },
+    {
+      "name": "get_status",
+      "file": "pygit.py",
+      "lines": [
+        170,
+        190
+      ],
+      "reached": true
+    },
+    {
+      "name": "hash_object",
+      "file": "pygit.py",
+      "lines": [
+        50,
+        62
+      ],
+      "reached": true
+    },
+    {
+      "name": "http_request",
+      "file": "pygit.py",
+      "lines": [
+        349,
+        358
+      ],
+      "reached": true
+    },
+    {
+      "name": "init",
+      "file": "pygit.py",
+      "lines": [
+        40,
+        47
+      ],
+      "reached": true
+    },
+    {
+      "name": "ls_files",
+      "file": "pygit.py",
+      "lines": [
+        157,
+        167
+      ],
+      "reached": true
+    },
+    {
+      "name": "push",
+      "file": "pygit.py",
+      "lines": [
+        471,
+        495
+      ],
+      "reached": true
+    },
+    {
+      "name": "read_file",
+      "file": "pygit.py",
+      "lines": [
+        28,
+        31
+      ],
+      "reached": true
+    },
+    {
+      "name": "read_index",
+      "file": "pygit.py",
+      "lines": [
+        129,
+        154
+      ],
+      "reached": true
+    },
+    {
+      "name": "read_object",
+      "file": "pygit.py",
+      "lines": [
+        83,
+        96
+      ],
+      "reached": true
+    },
+    {
+      "name": "read_tree",
+      "file": "pygit.py",
+      "lines": [
+        378,
+        398
+      ],
+      "reached": true
+    },
+    {
+      "name": "status",
+      "file": "pygit.py",
+      "lines": [
+        193,
+        207
+      ],
+      "reached": true
+    },
+    {
+      "name": "write_file",
+      "file": "pygit.py",
+      "lines": [
+        34,
+        37
+      ],
+      "reached": true
+    },
+    {
+      "name": "write_index",
+      "file": "pygit.py",
+      "lines": [
+        231,
+        246
+      ],
+      "reached": true
+    },
+    {
+      "name": "write_tree",
+      "file": "pygit.py",
+      "lines": [
+        268,
+        277
+      ],
+      "reached": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "read_index",
+      "where": "pygit.py:129",
+      "call_sites": 3,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.list"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "literal .git/index",
+          "r",
+          "read_file()"
+        ]
+      ],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "read_file"
+      ]
+    },
+    {
+      "name": "ls_files",
+      "where": "pygit.py:157",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "read_index"
+      ]
+    },
+    {
+      "name": "get_status",
+      "where": "pygit.py:170",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "status",
+      "where": "pygit.py:193",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "get_status"
+      ]
+    },
+    {
+      "name": "diff",
+      "where": "pygit.py:210",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "get_status",
+        "read_file",
+        "read_object"
+      ]
+    },
+    {
+      "name": "write_index",
+      "where": "pygit.py:231",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "literal .git/index",
+          "w",
+          "write_file()"
+        ]
+      ],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "write_file"
+      ]
+    },
+    {
+      "name": "add",
+      "where": "pygit.py:249",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "hash_object",
+        "read_file",
+        "read_index",
+        "write_index"
+      ]
+    },
+    {
+      "name": "write_tree",
+      "where": "pygit.py:268",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.str"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "hash_object",
+        "read_index"
+      ]
+    },
+    {
+      "name": "read_file",
+      "where": "pygit.py:28",
+      "call_sites": 6,
+      "loop_body": true,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [
+        "path"
+      ],
+      "io": [
+        [
+          "param path",
+          "r",
+          "open"
+        ]
+      ],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "get_local_master_hash",
+      "where": "pygit.py:280",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?",
+        "builtins.NoneType"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "literal .git/refs/heads/master",
+          "r",
+          "read_file()"
+        ]
+      ],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "read_file"
+      ]
+    },
+    {
+      "name": "commit",
+      "where": "pygit.py:289",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.str"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "literal .git/refs/heads/master",
+          "w",
+          "write_file()"
+        ]
+      ],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "get_local_master_hash",
+        "hash_object",
+        "write_file",
+        "write_tree"
+      ]
+    },
+    {
+      "name": "extract_lines",
+      "where": "pygit.py:321",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.list"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "build_lines_data",
+      "where": "pygit.py:338",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "write_file",
+      "where": "pygit.py:34",
+      "call_sites": 4,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [
+        "path"
+      ],
+      "io": [
+        [
+          "param path",
+          "w",
+          "open"
+        ]
+      ],
+      "breaks": "can't hash data: builtins.bytes (\u00a77.1) \u2192 recipe bytes; returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "http_request",
+      "where": "pygit.py:349",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "get_remote_master_hash",
+      "where": "pygit.py:361",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?",
+        "builtins.NoneType"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "extract_lines",
+        "http_request"
+      ]
+    },
+    {
+      "name": "read_tree",
+      "where": "pygit.py:378",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.list"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "read_object"
+      ]
+    },
+    {
+      "name": "init",
+      "where": "pygit.py:40",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [
+        "repo"
+      ],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "write_file"
+      ]
+    },
+    {
+      "name": "find_tree_objects",
+      "where": "pygit.py:401",
+      "call_sites": 2,
+      "loop_body": true,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "find_tree_objects",
+        "read_tree"
+      ]
+    },
+    {
+      "name": "find_commit_objects",
+      "where": "pygit.py:414",
+      "call_sites": 3,
+      "loop_body": true,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "find_commit_objects",
+        "find_tree_objects",
+        "read_object"
+      ]
+    },
+    {
+      "name": "find_missing_objects",
+      "where": "pygit.py:430",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "find_commit_objects"
+      ]
+    },
+    {
+      "name": "encode_pack_object",
+      "where": "pygit.py:441",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "read_object"
+      ]
+    },
+    {
+      "name": "create_pack",
+      "where": "pygit.py:459",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.bytes"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "can't hash the builtins.bytes it returns (\u00a76.2) \u2192 recipe bytes",
+      "unproduced": [],
+      "calls": [
+        "encode_pack_object"
+      ]
+    },
+    {
+      "name": "push",
+      "where": "pygit.py:471",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "?"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": [
+        "build_lines_data",
+        "create_pack",
+        "extract_lines",
+        "find_missing_objects",
+        "get_local_master_hash",
+        "get_remote_master_hash",
+        "http_request"
+      ]
+    },
+    {
+      "name": "hash_object",
+      "where": "pygit.py:50",
+      "call_sites": 4,
+      "loop_body": true,
+      "returned_none": false,
+      "returns": [
+        "builtins.str"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "can't hash data: builtins.bytes (\u00a77.1) \u2192 recipe bytes",
+      "unproduced": [
+        "data: builtins.bytes (from commit) \u2192 recipe bytes"
+      ],
+      "calls": [
+        "write_file"
+      ]
+    },
+    {
+      "name": "find_object",
+      "where": "pygit.py:65",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.str"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": null,
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "read_object",
+      "where": "pygit.py:83",
+      "call_sites": 5,
+      "loop_body": true,
+      "returned_none": false,
+      "returns": [
+        "tuple(builtins.str,builtins.bytes)"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "can't hash the tuple(builtins.str,builtins.bytes) it returns (\u00a76.2) \u2192 recipe tuple-return",
+      "unproduced": [],
+      "calls": [
+        "find_object",
+        "read_file"
+      ]
+    },
+    {
+      "name": "cat_file",
+      "where": "pygit.py:99",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "read_object",
+        "read_tree"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "read_file",
+      "to": "hash_object",
+      "via": "data",
+      "type": "builtins.bytes",
+      "passed": "positional",
+      "at": "<module pygit.py>",
+      "channel": "return",
+      "derived": false,
+      "confidence": "likely",
+      "decorator_edge": false,
+      "why": "@compute can't hash a builtins.bytes (\u00a77.1) \u2192 recipe bytes"
+    },
+    {
+      "from": "get_local_master_hash",
+      "to": "find_missing_objects",
+      "via": "local_sha1",
+      "type": "builtins.str",
+      "passed": "positional",
+      "at": "push",
+      "channel": "return",
+      "derived": false,
+      "confidence": "likely",
+      "decorator_edge": true,
+      "why": null
+    },
+    {
+      "from": "get_remote_master_hash",
+      "to": "find_missing_objects",
+      "via": "remote_sha1",
+      "type": "?",
+      "passed": "positional",
+      "at": "push",
+      "channel": "return",
+      "derived": false,
+      "confidence": "unknown",
+      "decorator_edge": null,
+      "why": "type unknown from the source"
+    },
+    {
+      "from": "find_missing_objects",
+      "to": "create_pack",
+      "via": "objects",
+      "type": "?",
+      "passed": "positional",
+      "at": "push",
+      "channel": "return",
+      "derived": false,
+      "confidence": "unknown",
+      "decorator_edge": null,
+      "why": "type unknown from the source"
+    },
+    {
+      "from": "http_request",
+      "to": "extract_lines",
+      "via": "data",
+      "type": "?",
+      "passed": "positional",
+      "at": "push",
+      "channel": "return",
+      "derived": false,
+      "confidence": "unknown",
+      "decorator_edge": null,
+      "why": "type unknown from the source"
+    },
+    {
+      "from": "find_object",
+      "to": "read_file",
+      "via": "path",
+      "type": "builtins.str",
+      "passed": "positional",
+      "at": "read_object",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": true,
+      "why": null
+    },
+    {
+      "from": "read_object",
+      "to": "read_tree",
+      "via": "data",
+      "type": "builtins.bytes",
+      "passed": "keyword",
+      "at": "cat_file",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "passed by keyword: @compute records positional arguments only (\u00a76.1)"
+    }
+  ],
+  "file_edges": [
+    {
+      "from": "commit",
+      "to": "get_local_master_hash",
+      "via": ".git/refs/heads/master"
+    },
+    {
+      "from": "write_index",
+      "to": "read_index",
+      "via": ".git/index"
+    }
+  ],
+  "unresolved_calls": [],
+  "components": {
+    "decorators_only": [
+      [
+        "find_missing_objects",
+        "get_local_master_hash"
+      ],
+      [
+        "commit"
+      ],
+      [
+        "create_pack"
+      ],
+      [
+        "extract_lines"
+      ],
+      [
+        "find_object"
+      ],
+      [
+        "get_remote_master_hash"
+      ],
+      [
+        "http_request"
+      ],
+      [
+        "read_index"
+      ],
+      [
+        "read_tree"
+      ],
+      [
+        "write_file"
+      ],
+      [
+        "write_index"
+      ]
+    ],
+    "with_builders": [
+      [
+        "commit",
+        "create_pack",
+        "find_missing_objects",
+        "get_local_master_hash",
+        "get_remote_master_hash"
+      ],
+      [
+        "extract_lines",
+        "http_request"
+      ],
+      [
+        "read_index",
+        "write_index"
+      ],
+      [
+        "find_object"
+      ],
+      [
+        "read_tree"
+      ],
+      [
+        "write_file"
+      ]
+    ]
+  }
+}

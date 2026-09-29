@@ -18,7 +18,7 @@ This file is the procedure. Two things it deliberately does not repeat:
 | Read | Before | What it settles |
 |---|---|---|
 | `references/mode2ideas.md` | step 3 | **which** operations become nodes: six always-archetypes, three when named, the never list, tie-breakers, the caption and count tests |
-| `references/eqtysdk.md` | step 4 | the SDK surface. **§6.10** (the rules for editing code to instrument it), **§6.0** (*decorate in place* — the decorator goes on the original definition, never a wrapper), **§6** (`@compute` and its other failure modes), **§11** (the post-run checklist), **§13.1** (the SDK is public, and a hard dependency — never shim it) |
+| `references/eqtysdk.md` | step 4 | the SDK surface. **§6.10** (the rules for editing code to instrument it), **§6.11** (recipes for the types `@compute` can't hash: datasets, models, tokenizers, configs), **§6.0** (*decorate in place* — the decorator goes on the original definition, never a wrapper), **§6** (`@compute` and its other failure modes), **§11** (the checklist for the manifest the user's run emits), **§13.1** (the SDK is public, and a hard dependency — never shim it) |
 
 Everything catalogued in `references/eqtysdk.md` produces a manifest that exports, verifies
 and reads as **green**, so none of it is caught by finishing the step and
@@ -26,7 +26,9 @@ checking that it worked.
 
 **Mode 2 has no `detect.py`.** Mode 1 is a script plus a procedure; Mode 2 is a
 procedure and agent judgment, gated by a human at step 2 and reviewed as a patch
-at the end. There is no deterministic edit to automate.
+at the end. There is no deterministic edit to automate. **And like Mode 1, it
+never runs the target** (SKILL.md): what the code does is read from the source,
+by the CFG agents and by `static_flow.py`, and the user's run is what tests it.
 
 ---
 
@@ -57,7 +59,7 @@ file, `references/mode2ideas.md`, the SDK, or the word "EQTY."**
 **Dispatch them with `isolated_cfg.py`, never as in-session subagents:**
 
 ```sh
-python3 <skill-dir>/isolated_cfg.py <target-repo> --out <scratch-dir> [--agent claude|codex] [--run "<run the user named>"]
+python3 <skill-dir>/isolated_cfg.py <target-repo> --out <scratch-dir> [--agent claude|codex] [--path "<the path the user named>"]
 ```
 
 A subagent spawned from your session inherits that session's context:
@@ -78,9 +80,11 @@ default when only `codex` is on PATH):
 **If it exits non-zero, or neither the `claude` nor the `codex` CLI is available, stop and report.** Do
 not fall back to an in-session subagent and do not draw the CFG yourself.
 
-**You do not choose which run of the program gets diagrammed.** L1 chooses it
-from the code and states it; you carry that statement to L2 so both levels
-describe the same run. Choosing it yourself is contamination: you have read this
+**You do not choose which path through the program gets diagrammed.** A *path*
+here is a way through the code (an entry point and, for a multi-command tool,
+the command sequence), not something that executes: nothing runs in step 1. L1
+chooses it from the code and states it; the script carries that statement to L2
+so both levels describe the same path. Choosing it yourself is contamination: you have read this
 file, so your pick would encode what a node is for — which is exactly what the
 blindfold exists to keep out of the CFG.
 
@@ -132,10 +136,15 @@ both ways reads side by side:
 ```
 <outdir>/<target>/
 ├── <target>.cfg.html               step 1 — L1 and L2, one file, SDK-agnostic
+├── <target>.flow.json              step 1b — the data flow, read from the source
+├── <target>.merged.md              step 1c — the CFG joined with the data flow, shown at step 2
 ├── <target>.auto.nodes.md          step 3 — the selection, auto
 ├── <target>.hitl.nodes.md          step 3 — the selection, HITL
-└── <target>.<mode>.manifest.json   step 6 — the lineage graph, as emitted
+└── <target>.<mode>.prediction.md   step 6 — what the user's run should emit, and how to check it
 ```
+
+No manifest is in this directory: the skill never runs the target (SKILL.md),
+so the lineage graph comes from the user's run, at the path step 6 names.
 
 `<mode>` is **`auto`** or **`hitl`** and nothing else. Instrumented source goes to
 a **tracked** path — `<instrumented>/<target>/` for auto,
@@ -151,7 +160,7 @@ not have. The only files the patch introduces are the ones outside the target's
 own source: `run_example.py`, any stub it needs, and the dependency file if the
 repo had none.
 
-**The manifest ships exactly as the SDK exported it — one copy, unedited.**
+**The manifest the user's run writes ships exactly as the SDK exported it — one copy, unedited.**
 There is no repaired or context-embedded second copy: the read side resolves
 the W3C contexts from `eqty_sdk` itself (`integrity.py`'s `verify_vc` /
 `verify_statement`), so a manifest does not have to carry them to be checkable.
@@ -170,7 +179,7 @@ selection is its own step, and only then is any code touched.**
 Point fresh agents at the target repo and have them derive a control-flow graph
 by reading the source — one per level, two per target, each a separate isolated
 process started by `isolated_cfg.py` (see the stop sign above). The script holds
-the two prompts and the mechanical parameters below verbatim; L2's `Run:` line is
+the two prompts and the mechanical parameters below verbatim; L2's `Path:` line is
 carried over from L1 by the script, not by you. Keep its `isolation.json` beside
 the CFG as the evidence that both agents were blind. **The CFG is an output
 artifact**, written to `<outdir>/<target>/<target>.cfg.html`: a self-contained
@@ -196,19 +205,19 @@ an agent will happily spend 30 boxes on the first two functions.
 
 **The entry point is L1's choice, not yours — and for a multi-command tool the
 *sequence* is too.** The same source gives different graphs depending on which
-command starts the run, which is why the choice is recorded rather than assumed:
+command it starts from, which is why the choice is recorded rather than assumed:
 
-- **L1 states the run it diagrammed** as the first line of its output — which
-  file or function starts it, and for a multi-command tool the command sequence.
-  Require that line; it is what makes the graph interpretable at all.
-- **You carry that line verbatim into the L2 dispatch**, so L2 goes deeper on the
-  same run rather than picking its own. This is the only entry-point information
+- **L1 states the path it diagrammed** as the first line of its output, `Path:` —
+  which file or function starts it, and for a multi-command tool the command
+  sequence. Require that line; it is what makes the graph interpretable at all.
+- **The script carries that line verbatim into the L2 dispatch**, so L2 goes
+  deeper on the same path rather than picking its own. This is the only entry-point information
   that ever flows from you to an agent, and it originates with L1, not with you.
 - **Step 3 records it** at the top of the node-selection doc, together with the
   other runnable paths through the repo, named as uninstrumented. A reader must
   be able to see what the manifest does *not* cover.
-- **If the user has said which run they care about, pass theirs through
-  instead**, and say in the selection doc that it came from the user. That is the
+- **If the user has said which path they care about, pass theirs through
+  instead** (`--path`), and say in the selection doc that it came from the user. That is the
   user's decision to make; it is not yours.
 
 **The deliverable is a diagram — boxes and arrows, drawn.** Not an annotated
@@ -236,11 +245,11 @@ Two dispatches, one output file.
 side by side, one card per level. Each card is headed with its level and budget
 (`L1 · ~9 boxes`, `L2 · ~30 boxes`) and quotes that level's prompt **verbatim**,
 exactly as the agent received it. Under the quote, note the one extra thing each
-agent was given: the L2 card says it also received the L1 diagram and L1's `Run:`
+agent was given: the L2 card says it also received the L1 diagram and L1's `Path:`
 line. Under the cards, two tabs switch between **L1 · high level** and
 **L2 · one level deeper**. Each tab shows:
 
-- the run that level diagrammed, from its `Run:` line;
+- the path that level diagrammed, from its `Path:` line;
 - the diagram itself;
 - the reference table, collapsed under a `<details>` summary.
 
@@ -265,12 +274,87 @@ hat: you would be expanding exactly the branches you already know become nodes.
 
 The CFG describes the program. What is worth recording comes next.
 
+### Step 1b — Read the data flow from the source
+
+While the CFG agents work, run the data-flow pass. It is a script, not an agent,
+so it carries no judgment into the CFG, and it runs none of the target's code:
+
+```sh
+python3 <skill-dir>/static_flow.py <target-repo> --entry <entry file from L1's Path: line> \
+    --out <outdir>/<target>/<target>.flow.json [--venv <the project's virtualenv>]
+```
+
+It follows every function the entry reaches: which one's result feeds which,
+what is changed in place, what goes through a file, which parameters are paths,
+what a bare `@compute` would raise on, and the `references/eqtysdk.md` §6.11
+recipe each hand-off needs. Every fact is marked **certain**, **likely** (it rests
+on the script's catalogue of library calls) or **unknown**.
+
+**Pyright is the default** for types: it type-checks a copy of the source with
+the project's installed libraries, and is run with no Python interpreter on its
+path, so it executes nothing. Point `--venv` at the project's environment if it
+is not `<repo>/.venv` or `venv`; with none, library types stay unknown.
+
+- **If pyright isn't installed,** the script stops and says so. Ask the user to
+  install it (`npm install -g pyright`; the npm build, since the pip wrapper is
+  itself Python). Don't install it yourself.
+- **If they decline,** rerun with `--types ast`. The script's own catalogue then
+  types what it knows, and everything else stays unknown. Say which one was used:
+  the report's first line names it.
+
+**Never show the data-flow report to the CFG agents,** and don't start them
+after reading it: it is an answer to "what flows where", and it would bend their
+boxes. They run from the stop sign above, blind; this runs beside them.
+
+### Step 1c — Join the CFG and the data flow
+
+Once both exist:
+
+```sh
+python3 <skill-dir>/merge_flow.py <cfg-dir> <outdir>/<target>/<target>.flow.json \
+    --out <outdir>/<target>/<target>.merged.md
+```
+
+It joins each L2 box to the function its "where it lives" column points into,
+and writes:
+
+- **the annotated L2 diagram:** the CFG's boxes and arrows, with each function's
+  box coloured by whether a bare `@compute` works there, naming the recipes it
+  needs, and dashed arrows for the hand-offs the CFG didn't draw. The one that
+  matters most is a value **changed in place**: the CFG draws the model going
+  from where it was built to where it is saved, while the version saved is the
+  one training changed. The arrow starts at the step that changed it;
+- **cross-checks:** a function the data flow reaches with no box (the CFG missed
+  it), a box naming no reached function (dead code, dispatch the source can't
+  follow, or nothing real), and a value made inline in a caller, an ingest with
+  no node unless it is recorded inline;
+- **the auto prediction:** functions, computations counting call sites, and
+  components.
+
+Add the annotated diagram to `<target>.cfg.html` as a third tab after L1 and L2,
+**L2 · with the data flow**, so the user sees it at step 2.
+
 ### Step 2 — Ask the user: auto or HITL
 
 **This is the one interactive gate. Everything after it runs to completion.**
 
-Show the CFG — both levels — and then ask, in these terms:
+**Don't ask when the answer is already known:**
 
+- **The request already names it** ("instrument this in auto mode", "let me
+  pick the nodes"): use that choice, and say so in one line when you show the
+  CFG.
+- **No one can answer:** a headless run (`codex exec`, `claude -p`, a CI job)
+  or a request to work without questions. Take **auto**, and record in
+  `<target>.<mode>.prediction.md` that it was taken because no one could be
+  asked.
+
+Otherwise, show the CFG — both levels, and L2 with the data flow — and ask, with
+the one-line summary at the top of `<target>.merged.md` so the user can judge
+whether picking by hand is worth it, in these terms:
+
+> *8 functions, 9 computations, 2 components; 1 hand-off unknown, 2 cross-checks
+> to review.*
+>
 > **Auto** — I take every node the CFG proposes and instrument all of them. You
 > review the patch at the end. Nothing to decide now.
 >
@@ -293,10 +377,11 @@ list: which CFG boxes become lineage-graph nodes, what each one's inputs and
 outputs are, and why. Write it to `<outdir>/<target>/<target>.<mode>.nodes.md`
 so the selection can be reviewed and argued with *before* a patch exists.
 
-**Open it with the run the CFG describes, as L1 stated it**, and with the other
-runnable paths through the repo listed as uninstrumented. The selection is only
-meaningful against one run of the program, and a reader who cannot see which run
-— or which ones were left out — cannot tell a scoping decision from an omission.
+**Open it with the path the CFG describes, as L1 stated it**, and with the other
+paths through the repo listed as uninstrumented. The selection is only
+meaningful against one path through the program, and a reader who cannot see
+which one — or which ones were left out — cannot tell a scoping decision from an
+omission.
 
 This is where EQTY enters. Apply `references/mode2ideas.md` — the archetypes, the never
 list, the tie-breakers, the caption and count tests — and then the mode decides
@@ -314,14 +399,29 @@ that the CFG didn't surface. Then do the part that makes HITL hard: **chain the
 user's first node to their last.** A hand-picked set fragments — you cannot
 record a tree object without the steps that built it — so fill in the
 intermediate nodes needed to keep the lineage graph connected end to end, and
-**list which ones you added and why.** The user picked the nodes, not the call
-sites; placement is still yours (step 4).
+**list which ones you added and why.** `merge_flow.py ... --pick <box,box,...>`
+does the chaining on the data flow: it adds the functions the picks need to
+connect (`added train: carries model between evaluate and save_adapter`) and
+predicts the result. The user picked the nodes, not the call sites; placement is
+still yours (step 4).
+
+**HITL may also ask about unknowns, auto never does.** After the picks, ask only
+about the `unknown` facts the merge lists that change the selection's edges or
+component count, in terms of the user's program ("`load()` returns what
+`json.load` gives it: a dict of rows, or a list?"), each with the default auto
+would take. Auto takes those defaults silently and lists each one in the
+prediction file as an assumption.
+
+**For an unknown, prefer a recipe that doesn't depend on the answer.** A dict and
+a list hash the same way through `from_object` in a builder; only `@compute`'s
+list expansion tells them apart (`references/eqtysdk.md` §6.4). Where no such
+recipe exists, take the likelier reading and state it.
 
 **Both modes chain.** Chaining is not HITL's special burden — see the rules
 below. Whichever mode you are in, **write down the expected node count, root
-count and graph shape before the run.** The selection is a prediction and the
-manifest is what tests it; a prediction that misses is the signal that step 3 was
-wrong, and it is invisible if you never wrote it down.
+count and graph shape**, starting from the merge's prediction. The selection is a prediction, and the manifest from the
+user's run is what tests it; a prediction that misses is the signal that step 3
+was wrong, and it is invisible if you never wrote it down.
 
 ### Step 4 — Instrument the repo with the EQTY SDK
 
@@ -364,8 +464,11 @@ and verifies green either way.
 **Read `references/eqtysdk.md` §6.0 and §6.10 before placing a single decorator.** When an
 original genuinely cannot take a decorator, work down this ladder: an allowed fix
 from §6.10; then `to_eqty_asset()`; then the `Computation` builder **inside the
-target function**, recording what that function actually reads and writes; then a
-reported gap. **The bottom rung is a reported gap, never an adapter.**
+target function**, recording what that function actually reads and writes, **and
+its own source as a `Code` input** (`inspect.getsource`, `references/eqtysdk.md`
+§6.11): a builder records only what it is given, so without that line the node
+attests the data and not the code; then a reported gap. **The bottom rung is a
+reported gap, never an adapter.**
 
 ***Edit to instrument, but preserve behavior and record only real data flow.***
 The instrumented file is the program that ships, so the manifest honestly attests
@@ -406,13 +509,16 @@ recorded goes in the patch as a **reported gap**: path-text or identifier inputs
 
 The rules below are what this step gets wrong. Work them as a checklist.
 
-### Step 5 — Write a small runnable example
+### Step 5 — Write a small runnable example, and don't run it
 
-Instrumented code that never runs emits nothing. Add a **small, self-contained
-example** that exercises the instrumented path and produces a manifest —
-scripted, no API keys, deterministic where possible,
-and matched to the run L1 diagrammed — the entry point and command sequence
-stated in the CFG.
+Instrumented code that never runs emits nothing, and the skill never runs it
+(SKILL.md). So give the user something small to run: a **self-contained example**
+that exercises the instrumented path and produces a manifest — scripted, no API
+keys, deterministic where possible, and matched to the path L1 diagrammed (the
+entry point and command sequence stated in the CFG). Where the target's own
+entry point already does that once instrumented, name it instead and write no
+example. Write the file; never execute it, import it, or run the target to test
+it.
 
 **Nothing the skill writes is ever instrumented.** `run_example.py`, scripted
 backends, stubbed remotes, harnesses, fixtures — every file that exists because
@@ -434,18 +540,36 @@ Where a real run needs weights, a GPU, credentials or a network peer, **stub the
 boundary, not the logic**: a scripted backend or a local stand-in, so the real
 control flow, the real node set and the real chaining all execute. Say plainly in
 the patch what was stubbed — **a manifest over a stubbed component is not a claim
-about that component.** Confirm before instrumenting; if a real run turns out to
-be required, that is a hardware or credentials ask, not a code one.
+about that component.** If a real run turns out to be required, that is a
+hardware or credentials matter for the user, not something for the skill to try.
 
-### Step 6 — Run it, export the manifest, read it back
+### Step 6 — Hand over the prediction and the checks
 
-Run the example, export `manifest.json`, then verify it with the read side —
-`eqty-manifest`. The lineage graph is what comes out of that.
+Write `<target>.<mode>.prediction.md`, and put the same in the patch. It holds:
 
-**A green verifier is not the finish line.** Work the checklist in `references/eqtysdk.md`
-§11. A manifest can verify perfectly while the node labelled "checkpoint" contains
-a temporary file path, or while a `Code` blob holds an adapter instead of the
-target's function. Read the node names and the `Code` blobs.
+- **the command** that runs the example (or the entry point), and the manifest
+  path it writes;
+- **the prediction** from step 3: computation count, component count, roots and
+  shape, from `static_flow.py`'s report restricted to the selected nodes;
+- **the assumptions:** every fact the static pass marked `likely` or `unknown`
+  that the placement rests on, each with what the patch assumed, so the user
+  knows what their run is testing;
+- **the checks for that manifest:** `eqty-manifest`'s `summary.py`, then
+  `<skill-dir>/check_graph.py <manifest> --expect-computations N
+  --expect-components N`, then the `references/eqtysdk.md` §11 checklist.
+
+Say plainly that nothing was run and the patch is unverified until it runs where
+it is deployed. **Don't ask the user to run it and don't wait for a manifest:**
+that run often needs a cloud deployment that doesn't exist yet. The step ends
+when the prediction file and the patch are written. If a manifest is handed to
+you later, working the checks is fine: they read it and execute none of the
+target's code.
+
+**A green verifier is not the finish line, for them or for you.** Work the
+checklist in `references/eqtysdk.md` §11. A manifest can verify perfectly while
+the node labelled "checkpoint" contains a temporary file path, or while a `Code`
+blob holds an adapter instead of the target's function. Read the node names and
+the `Code` blobs.
 
 **What the emitter embeds.** `eqty_sdk`'s exporter omits the W3C JSON-LD
 contexts its credentials reference, so a fresh manifest verifies **`0 / N`** from
@@ -455,7 +579,7 @@ in the SDK's `integrity.py` carry those contexts compiled in and resolve them
 offline, so the signatures verify with no post-export step and no second file.
 **Export once, and export nothing but the manifest.**
 
-**Compare the graph's connectivity with the prediction before claiming success.**
+**When a manifest exists, its connectivity is compared with the prediction.**
 Every component beyond the one predicted is either a node-placement mistake to fix
 or a missing edge to report. Never fix it by changing the target's signatures or
 return values.
@@ -571,15 +695,19 @@ procedure, not by reading the SDK.
 
 - [ ] The CFG was drawn by agents that never saw this file, `references/mode2ideas.md` or the SDK — and L2 was **dispatched**, not derived from L1.
 - [ ] Both CFG agents were started by `isolated_cfg.py`, not as in-session subagents. Its `isolation.json` sits beside the CFG, names the agent (`claude` or `codex`), and every check in it passes: no skills, no MCP servers, tools limited, every tool call inside the agent's own copy.
-- [ ] The user was asked auto vs HITL at step 2, and asked nothing about nodes before it.
+- [ ] `<target>.flow.json` came from `static_flow.py` on the entry L1 named, and its first line says whether pyright was used; if not, the user declined to install it. The CFG agents never saw it.
+- [ ] `<target>.merged.md` exists, the user saw its annotated L2 diagram at step 2, and every cross-check in it is answered in the node list.
+- [ ] At step 2 the user was asked auto vs HITL, with the merge's summary line, and asked nothing about nodes before it — or the choice came from the request, or auto was taken because no one could be asked, and the prediction file says which.
 - [ ] A node list exists, in writing, and predates the patch.
 - [ ] In HITL: the nodes added to chain the user's picks are listed, with why.
-- [ ] Predicted node count, root count and graph shape were written down before the run — and are compared against the manifest after it.
+- [ ] Predicted node count, root count and graph shape are written down in `<target>.<mode>.prediction.md`, with every `likely` or `unknown` fact the placement assumed.
+- [ ] **Nothing of the target was run, imported or executed**, the user was not asked to run it, and the handoff says the patch is unverified until it runs where it is deployed.
 - [ ] `eqty_sdk` is imported at top level, unconditionally — no `try/except ImportError`, no plain-value asset fallback.
 - [ ] No locally-defined compute decorator. `eqty_sdk.compute` is applied directly, with metadata written inline.
 - [ ] **Every `@compute` sits on a function that exists in the pristine target** — same name, same file. No adapter, no `eqty_*` twin, no new module of decorated functions.
 - [ ] The patch adds **no new source file to the target**. Instrumentation is edits to files that were already there.
 - [ ] No node uses `Code.from_path` to point at "where the real logic lives" — that helper is an adapter confessing.
+- [ ] **Every `Computation` builder takes its own function's source** as a `Code` input, `inspect.getsource(<that function>)`, right after `Computation.new(...)` — never another function's, never a file's.
 - [ ] **Nothing the skill wrote is instrumented.** `run_example.py`, scripted backends and stubs carry no nodes; they call the target with the argument types its own callers use.
 - [ ] Any node that could not be placed on an original definition is **reported as a gap**, naming which rung of the step 4 ladder was tried.
 - [ ] **Every edit to the target is named in the patch with the `references/eqtysdk.md` §6.10 rule that allows it.** Behavior is unchanged for every caller, including the target's own command line, which still records its runs.
@@ -588,15 +716,14 @@ procedure, not by reading the SDK.
 - [ ] The target repo's dependency file declares `eqty_sdk==<version>`.
 - [ ] `Custom` nodes, generated names, path-text inputs, identifier inputs and missing edges that remain are **listed as reported gaps**.
 - [ ] The SDK directory the entry point initialises, with its signer key, is outside the user's tracked files.
-- [ ] Connectivity matches the prediction, or every extra component is explained.
 - [ ] Every node's `computation_type` metadata is set.
 - [ ] Every `_store=False` registration carries `storage="by-reference"` and a `storage_reason`, is a heavy artifact by what the target loads in real use, and is listed as a gap. Nothing else is `_store=False`.
-- [ ] No decoded blob holds an absolute path or a user name — stubs are built with relative paths (`references/eqtysdk.md` §11).
-- [ ] `references/eqtysdk.md` §11 worked, and `<skill-dir>/check_graph.py <manifest> --expect-computations N --expect-components N` passes; its reported items all appear in the patch's gap list.
-- [ ] Exactly one manifest, exactly as emitted — no repaired or context-embedded second copy.
+- [ ] Stubs and the example use relative paths, so no blob of the user's manifest will hold an absolute path or a user name (`references/eqtysdk.md` §11).
+- [ ] The handoff gives the `check_graph.py <manifest> --expect-computations N --expect-components N` command with the predicted numbers, and the §11 checklist to work on the manifest.
+- [ ] The example exports exactly one manifest, as emitted — no repaired or context-embedded second copy.
 - [ ] Anything stubbed for the example is named in the patch, with what the manifest therefore does not claim.
 
-## How to check the result
+## How to check the result, once the user has run it
 
 - **Walk someone through the lineage graph step by step** — *this is the commit
   message I typed, this is the patch, and here it all is, captured.* If that

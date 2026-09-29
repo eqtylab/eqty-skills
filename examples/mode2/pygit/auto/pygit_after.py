@@ -5,10 +5,10 @@ Read the story here: http://benhoyt.com/writings/pygit/
 Released under a permissive MIT license (see LICENSE.txt).
 """
 
-import argparse, atexit, collections, difflib, enum, hashlib, operator, os
+import argparse, atexit, collections, difflib, enum, hashlib, inspect, operator, os
 import stat, struct, sys, time, urllib.request, uuid, zlib
 
-from eqty_sdk import (Binary, Computation, Context, Custom, Document, Signer,
+from eqty_sdk import (Binary, Code, Computation, Context, Custom, Document, Signer,
                       compute, get_cid_for_bytes, init as eqty_init,
                       set_active_signer)
 
@@ -284,6 +284,8 @@ def add(paths):
             description='File bytes as read, blob objects and index as '
                         'written',
             computation_type='ingest', _store=True)
+    eqty_add.add_input_cid(Code.from_object(
+            inspect.getsource(add), name='add', _store=True).cid)
     eqty_read_index = os.path.exists(os.path.join('.git', 'index'))
     if eqty_read_index:
         eqty_add.add_input_path(os.path.join('.git', 'index'))
@@ -347,6 +349,8 @@ def commit(message, author=None):
             description='Index and parent ref as read; tree object, commit '
                         'object, refs/heads/master and commit id as written',
             computation_type='transform', _store=True)
+    eqty_commit.add_input_cid(Code.from_object(
+            inspect.getsource(commit), name='commit', _store=True).cid)
     eqty_read_index = os.path.exists(os.path.join('.git', 'index'))
     if eqty_read_index:
         eqty_commit.add_input_path(os.path.join('.git', 'index'))
@@ -445,6 +449,9 @@ def get_remote_master_hash(git_url, username, password):
                 description='Remote ref advertisement as received; the '
                             'remote master id when the remote has one',
                 computation_type='ingest', _store=True)
+            .add_input_cid(Code.from_object(
+                    inspect.getsource(get_remote_master_hash),
+                    name='get_remote_master_hash', _store=True).cid)
             .add_input_cid(Custom.from_object(url, name='info/refs URL').cid)
             .add_output_cid(Document.from_cid(
                     get_cid_for_bytes(response, _store=True),
@@ -558,6 +565,9 @@ def create_pack(objects):
                 description='Object files packed (as stored); PACK v2 bytes '
                             'produced',
                 computation_type='aggregate', _store=True)
+            .add_input_cid(Code.from_object(
+                    inspect.getsource(create_pack), name='create_pack',
+                    _store=True).cid)
             .add_input_path([os.path.join('.git', 'objects', o[:2], o[2:])
                              for o in sorted(objects)])
             .add_output_cid(Binary.from_cid(
@@ -578,6 +588,8 @@ def push(git_url, username=None, password=None):
             description='Local master ref as read, remote master id, pack '
                         'sent; the remote status report received',
             computation_type='emit', _store=True)
+    eqty_push.add_input_cid(Code.from_object(
+            inspect.getsource(push), name='push', _store=True).cid)
     if remote_sha1 is not None:
         eqty_push.add_input_object(remote_sha1)
     if os.path.exists(os.path.join('.git', 'refs', 'heads', 'master')):

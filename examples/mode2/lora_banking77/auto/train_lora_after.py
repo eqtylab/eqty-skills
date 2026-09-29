@@ -1,0 +1,166 @@
+"""LoRA fine-tuning of a small base model on banking77 intent classification.
+
+    python train_lora.py --base <hf model id> --out runs/lora [--max-steps N] [--train-rows N]
+"""
+import argparse
+import inspect
+import io
+import json
+import os
+from pathlib import Path
+
+import eqty_sdk as sdk
+from datasets import load_dataset
+from huggingface_hub import try_to_load_from_cache
+from peft import LoraConfig, TaskType, get_peft_model, get_peft_model_state_dict
+from safetensors.torch import save as safetensors_bytes
+from transformers import (AutoModelForSequenceClassification, AutoTokenizer, DataCollatorWithPadding,
+                          Trainer, TrainingArguments)
+
+
+def load_banking77(train_rows):
+    ds = load_dataset("mteb/banking77")
+    train_split, eval_split = ds["train"].shuffle(seed=0).select(range(train_rows)), ds["test"].select(range(train_rows // 4))
+    run = sdk.Computation.new(name="Load banking77", computation_type="ingest", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(load_banking77), name="load_banking77",
+                                           _store=True).cid)   # as @compute would
+    for split in (ds["train"], ds["test"]):
+        for f in split.cache_files:   # the Arrow files the library built from the hub's parquet
+            run.add_input_cid(sdk.Dataset.from_path(f["filename"], name=f"banking77 {split.split}", _store=False,
+                                                    storage="by-reference", storage_reason="full source dataset",
+                                                    obtain_from="huggingface.co/datasets/mteb/banking77").cid)
+    for split, name in ((train_split, "train rows"), (eval_split, "eval rows")):
+        buf = io.BytesIO()
+        split.to_parquet(buf)
+        run.add_output_cid(sdk.Dataset.from_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True), name=name).cid)
+    run.finalize()
+    return train_split, eval_split
+
+
+def tokenize(split, tokenizer):
+    out = split.map(lambda b: tokenizer(b["text"], truncation=True, max_length=64), batched=True)
+    run = sdk.Computation.new(name="Tokenize", computation_type="transform", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(tokenize), name="tokenize",
+                                           _store=True).cid)   # as @compute would
+    buf = io.BytesIO()
+    split.to_parquet(buf)
+    run.add_input_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True))
+    run.add_input_cid(sdk.Configuration.from_cid(sdk.get_cid_for_bytes(tokenizer.backend_tokenizer.to_str().encode(),
+                                                                        _store=True),
+                                                 name=f"tokenizer {tokenizer.name_or_path}").cid)
+    buf = io.BytesIO()
+    out.to_parquet(buf)
+    run.add_output_cid(sdk.Dataset.from_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True),
+                                            name=f"tokenized {len(out)} rows").cid)
+    run.finalize()
+    return out
+
+
+def build_model(base, num_labels, rank):
+    model = AutoModelForSequenceClassification.from_pretrained(base, num_labels=num_labels)
+    config = LoraConfig(task_type=TaskType.SEQ_CLS, r=rank, lora_alpha=2 * rank, lora_dropout=0.1,
+                        target_modules=["query", "value"])
+    peft_model = get_peft_model(model, config)
+    run = sdk.Computation.new(name="Build LoRA model", computation_type="transform", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(build_model), name="build_model",
+                                           _store=True).cid)   # as @compute would
+    weights = (os.path.join(base, "model.safetensors") if os.path.isdir(base)
+               else try_to_load_from_cache(base, "model.safetensors", revision=model.config._commit_hash))
+    if isinstance(weights, str) and os.path.isfile(weights):   # sharded or .bin-only weights: a reported gap
+        run.add_input_cid(sdk.Model.from_path(weights, name=f"base weights {base}", _store=False, storage="by-reference",
+                                              storage_reason="base model weights; real bases are several GB",
+                                              obtain_from=f"huggingface.co/{base}@{model.config._commit_hash}").cid)
+    run.add_input_cid(sdk.Configuration.from_object(json.loads(json.dumps(config.to_dict(), default=sorted)),
+                                                    name="LoRA config", _store=True).cid)   # sets, sorted: stable across runs
+    run.add_output_cid(sdk.Model.from_cid(sdk.get_cid_for_bytes(safetensors_bytes(get_peft_model_state_dict(peft_model)),
+                                                                _store=True), name="LoRA adapter, initial").cid)
+    run.finalize()
+    return peft_model
+
+
+def train(model, train_split, tokenizer, out, max_steps):
+    args = TrainingArguments(output_dir=out, max_steps=max_steps, per_device_train_batch_size=16,
+                             learning_rate=5e-4, logging_steps=1, save_strategy="no", report_to=[])
+    trainer = Trainer(model=model, args=args, train_dataset=train_split,
+                      data_collator=DataCollatorWithPadding(tokenizer))
+    run = sdk.Computation.new(name="Train LoRA adapter", computation_type="transform", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(train), name="train",
+                                           _store=True).cid)   # as @compute would
+    run.add_input_cid(sdk.get_cid_for_bytes(safetensors_bytes(get_peft_model_state_dict(model)), _store=True))
+    buf = io.BytesIO()
+    train_split.to_parquet(buf)
+    run.add_input_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True))
+    run.add_input_cid(sdk.Configuration.from_object(json.loads(args.to_json_string()), name="training arguments",
+                                                    _store=True).cid)
+    trainer.train()
+    run.add_output_cid(sdk.Model.from_cid(sdk.get_cid_for_bytes(safetensors_bytes(get_peft_model_state_dict(model)),
+                                                                _store=True), name="LoRA adapter, trained").cid)
+    run.finalize()
+    return trainer
+
+
+def evaluate(trainer, eval_split):
+    metrics = trainer.evaluate(eval_split)
+    run = sdk.Computation.new(name="Evaluate", computation_type="transform", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(evaluate), name="evaluate",
+                                           _store=True).cid)   # as @compute would
+    run.add_input_cid(sdk.get_cid_for_bytes(safetensors_bytes(get_peft_model_state_dict(trainer.model)), _store=True))
+    buf = io.BytesIO()
+    eval_split.to_parquet(buf)
+    run.add_input_cid(sdk.get_cid_for_bytes(buf.getvalue(), _store=True))
+    run.add_output_cid(sdk.BenchmarkResult.from_object(metrics, name="eval metrics", _store=True).cid)
+    run.finalize()
+    return metrics
+
+
+def save_adapter(model, out):
+    model.save_pretrained(os.path.join(out, "adapter"))
+    run = sdk.Computation.new(name="Save adapter", computation_type="emit", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(save_adapter), name="save_adapter",
+                                           _store=True).cid)   # as @compute would
+    run.add_input_cid(sdk.get_cid_for_bytes(safetensors_bytes(get_peft_model_state_dict(model)), _store=True))
+    adapter = os.path.join(out, "adapter")
+    run.add_output_cid(sdk.Model.from_path(os.path.join(adapter, "adapter_model.safetensors"),
+                                           name="adapter_model.safetensors", _store=True).cid)
+    run.add_output_cid(sdk.Configuration.from_path(os.path.join(adapter, "adapter_config.json"),
+                                                   name="adapter_config.json", _store=True).cid)
+    run.finalize()
+
+
+def write_metrics(metrics, out):
+    with open(os.path.join(out, "metrics.json"), "w") as f:
+        json.dump(metrics, f, indent=2)
+    run = sdk.Computation.new(name="Write metrics", computation_type="emit", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(write_metrics), name="write_metrics",
+                                           _store=True).cid)   # as @compute would
+    run.add_input_object(metrics)
+    run.add_output_cid(sdk.Document.from_path(os.path.join(out, "metrics.json"), name="metrics.json", _store=True).cid)
+    run.finalize()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", default="boltuix/bert-micro")
+    ap.add_argument("--out", default="runs/lora")
+    ap.add_argument("--max-steps", type=int, default=2)
+    ap.add_argument("--train-rows", type=int, default=64)
+    ap.add_argument("--rank", type=int, default=8)
+    a = ap.parse_args()
+
+    train_split, eval_split = load_banking77(a.train_rows)
+    tokenizer = AutoTokenizer.from_pretrained(a.base)
+    train_split, eval_split = tokenize(train_split, tokenizer), tokenize(eval_split, tokenizer)
+    model = build_model(a.base, 77, a.rank)
+    trainer = train(model, train_split, tokenizer, a.out, a.max_steps)
+    metrics = evaluate(trainer, eval_split)
+    save_adapter(model, a.out)
+    write_metrics(metrics, a.out)
+
+
+if __name__ == "__main__":
+    # EQTY lineage: the SDK directory, with the signer's key, lives outside the repo
+    eqty_dir = Path(os.environ.get("EQTY_DIR", Path.home() / ".eqty" / "lora-banking77"))
+    cfg = sdk.init(default_context=sdk.Context.new("lora-banking77"), custom_dir=eqty_dir)
+    sdk.set_active_signer(sdk.Signer.load_or_create(name="train-lora"))
+    main()
+    cfg.get_default_context().export(Path(os.environ.get("EQTY_MANIFEST", eqty_dir / "manifests" / "train_lora.json")))

@@ -1,0 +1,395 @@
+{
+  "entry": "train_lora.py",
+  "types_from": "pyright 1.1.414 and the catalogue; environment: the project's virtualenv (transformers, peft, datasets installed)",
+  "functions": [
+    {
+      "name": "build_model",
+      "file": "train_lora.py",
+      "lines": [
+        24,
+        28
+      ],
+      "reached": true
+    },
+    {
+      "name": "evaluate",
+      "file": "train_lora.py",
+      "lines": [
+        40,
+        41
+      ],
+      "reached": true
+    },
+    {
+      "name": "load_banking77",
+      "file": "train_lora.py",
+      "lines": [
+        15,
+        17
+      ],
+      "reached": true
+    },
+    {
+      "name": "main",
+      "file": "train_lora.py",
+      "lines": [
+        53,
+        69
+      ],
+      "reached": true
+    },
+    {
+      "name": "save_adapter",
+      "file": "train_lora.py",
+      "lines": [
+        44,
+        45
+      ],
+      "reached": true
+    },
+    {
+      "name": "tokenize",
+      "file": "train_lora.py",
+      "lines": [
+        20,
+        21
+      ],
+      "reached": true
+    },
+    {
+      "name": "train",
+      "file": "train_lora.py",
+      "lines": [
+        31,
+        37
+      ],
+      "reached": true
+    },
+    {
+      "name": "write_metrics",
+      "file": "train_lora.py",
+      "lines": [
+        48,
+        50
+      ],
+      "reached": true
+    }
+  ],
+  "steps": [
+    {
+      "name": "load_banking77",
+      "where": "train_lora.py:15",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "tuple(datasets.Dataset,datasets.Dataset)"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "Hugging Face hub or cache",
+          "r",
+          "load_dataset"
+        ]
+      ],
+      "breaks": "can't hash the tuple(datasets.Dataset,datasets.Dataset) it returns (\u00a76.2) \u2192 recipe tuple-return",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "tokenize",
+      "where": "train_lora.py:20",
+      "call_sites": 2,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "datasets.Dataset"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "can't hash split: datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset; can't hash tokenizer: transformers.PreTrainedTokenizerBase (\u00a77.1) \u2192 recipe hf-tokenizer; can't hash the datasets.Dataset it returns (\u00a76.2) \u2192 recipe hf-dataset",
+      "unproduced": [
+        "tokenizer: transformers.PreTrainedTokenizerBase (from main) \u2192 recipe hf-tokenizer"
+      ],
+      "calls": []
+    },
+    {
+      "name": "build_model",
+      "where": "train_lora.py:24",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "peft.PeftModel"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "Hugging Face hub or cache",
+          "r",
+          "from_pretrained"
+        ]
+      ],
+      "breaks": "can't hash the peft.PeftModel it returns (\u00a76.2) \u2192 recipe peft-model",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "train",
+      "where": "train_lora.py:31",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "transformers.Trainer"
+      ],
+      "mutated": [
+        "model (likely)"
+      ],
+      "path_args": [
+        "out"
+      ],
+      "io": [
+        [
+          "param out",
+          "w",
+          "output_dir"
+        ]
+      ],
+      "breaks": "can't hash model: peft.PeftModel (\u00a77.1) \u2192 recipe peft-model; can't hash train_split: datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset; can't hash tokenizer: transformers.PreTrainedTokenizerBase (\u00a77.1) \u2192 recipe hf-tokenizer; can't hash the transformers.Trainer it returns (\u00a76.2) \u2192 recipe hf-trainer",
+      "unproduced": [
+        "tokenizer: transformers.PreTrainedTokenizerBase (from main) \u2192 recipe hf-tokenizer"
+      ],
+      "calls": []
+    },
+    {
+      "name": "evaluate",
+      "where": "train_lora.py:40",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": false,
+      "returns": [
+        "builtins.dict"
+      ],
+      "mutated": [],
+      "path_args": [],
+      "io": [],
+      "breaks": "can't hash trainer: transformers.Trainer (\u00a77.1) \u2192 recipe hf-trainer; can't hash eval_split: datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "save_adapter",
+      "where": "train_lora.py:44",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [
+        "out"
+      ],
+      "io": [
+        [
+          "param out",
+          "w",
+          ".save_pretrained() \u2014 native code, e.g. safetensors"
+        ]
+      ],
+      "breaks": "can't hash model: peft.PeftModel (\u00a77.1) \u2192 recipe peft-model; returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "write_metrics",
+      "where": "train_lora.py:48",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [
+        "out"
+      ],
+      "io": [
+        [
+          "param out",
+          "w",
+          "open"
+        ]
+      ],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": []
+    },
+    {
+      "name": "main",
+      "where": "train_lora.py:53",
+      "call_sites": 1,
+      "loop_body": false,
+      "returned_none": true,
+      "returns": [],
+      "mutated": [],
+      "path_args": [],
+      "io": [
+        [
+          "Hugging Face hub or cache",
+          "r",
+          "from_pretrained"
+        ]
+      ],
+      "breaks": "returns None (\u00a76.2) \u2192 recipe none-return",
+      "unproduced": [],
+      "calls": [
+        "build_model",
+        "evaluate",
+        "load_banking77",
+        "save_adapter",
+        "tokenize",
+        "train",
+        "write_metrics"
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "from": "load_banking77",
+      "to": "tokenize",
+      "via": "split",
+      "type": "datasets.Dataset",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "@compute can't hash a datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset"
+    },
+    {
+      "from": "build_model",
+      "to": "train",
+      "via": "model",
+      "type": "peft.PeftModel",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "@compute can't hash a peft.PeftModel (\u00a77.1) \u2192 recipe peft-model"
+    },
+    {
+      "from": "tokenize",
+      "to": "train",
+      "via": "train_split",
+      "type": "datasets.Dataset",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "@compute can't hash a datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset"
+    },
+    {
+      "from": "train",
+      "to": "evaluate",
+      "via": "trainer",
+      "type": "transformers.Trainer",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "@compute can't hash a transformers.Trainer (\u00a77.1) \u2192 recipe hf-trainer"
+    },
+    {
+      "from": "tokenize",
+      "to": "evaluate",
+      "via": "eval_split",
+      "type": "datasets.Dataset",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": false,
+      "why": "@compute can't hash a datasets.Dataset (\u00a77.1) \u2192 recipe hf-dataset"
+    },
+    {
+      "from": "train",
+      "to": "save_adapter",
+      "via": "model",
+      "type": "peft.PeftModel",
+      "passed": "positional",
+      "at": "main",
+      "channel": "in place",
+      "derived": false,
+      "confidence": "likely",
+      "decorator_edge": false,
+      "why": "changed in place by train; no step returned this version \u2192 recipe peft-model"
+    },
+    {
+      "from": "evaluate",
+      "to": "write_metrics",
+      "via": "metrics",
+      "type": "builtins.dict",
+      "passed": "positional",
+      "at": "main",
+      "channel": "return",
+      "derived": false,
+      "confidence": "certain",
+      "decorator_edge": true,
+      "why": null
+    }
+  ],
+  "file_edges": [],
+  "unresolved_calls": [],
+  "components": {
+    "decorators_only": [
+      [
+        "build_model"
+      ],
+      [
+        "evaluate"
+      ],
+      [
+        "load_banking77"
+      ],
+      [
+        "main"
+      ],
+      [
+        "save_adapter"
+      ],
+      [
+        "tokenize"
+      ],
+      [
+        "train"
+      ],
+      [
+        "write_metrics"
+      ]
+    ],
+    "with_builders": [
+      [
+        "build_model",
+        "evaluate",
+        "load_banking77",
+        "save_adapter",
+        "tokenize",
+        "train",
+        "write_metrics"
+      ],
+      [
+        "main"
+      ]
+    ]
+  }
+}

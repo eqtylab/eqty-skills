@@ -7,8 +7,9 @@ and this skill hands off to it.
 
 The skill lives in [`plugins/eqty-skills/eqty-instrument/`](../plugins/eqty-skills/eqty-instrument/);
 its `SKILL.md` is the entry point and the thing an agent loads. This page is for
-people, and is not installed. Real runs of both modes are in
-[`examples/`](../examples/).
+people, and is not installed. Runs of both modes are in
+[`examples/`](../examples/README.md); `mode2/lora_banking77` and `mode2/pygit`
+show the current Mode 2 flow.
 
 ## Two modes
 
@@ -20,8 +21,15 @@ time. Procedure in `references/mode1.md`.
 
 **Mode 2** — arbitrary Python, where no framework has decided which operations
 deserve nodes. A procedure rather than a script: derive a control-flow graph
-first, pick nodes auto or with the user, then instrument. Procedure in
+with blind agents, read the data flow from the source (pyright for types), join
+the two, pick nodes auto or with the user, then instrument. Procedure in
 `references/mode2.md`.
+
+**Neither mode runs your code.** The skill reads the source and writes a patch.
+It doesn't run the target, its tests or an example, and it doesn't ask you to run
+it: instrumented code often runs only once deployed. The patch says what command
+runs it, the manifest path that run will write, the graph it should produce, and
+the checks to work on that manifest when it exists.
 
 Detection is per module, not per repo — a real codebase is LangGraph in one place
 and plain Python everywhere else, so a module matching nothing is reported as a
@@ -38,7 +46,9 @@ Mode 2 candidate, not a failure.
 | `references/mode2ideas.md` | Mode 2's rules for which operations become nodes |
 | `references/upstream/` | the `eqty-lineage` originals Mode 1 cites, vendored verbatim with `SOURCES.md` |
 | `detect.py` | stdlib-only AST scan → JSON edit plan and human summary |
-| `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
+| `static_flow.py` | Mode 2 step 1b: the data flow read from the source — hand-offs, types (pyright by default, else the stdlib AST), the recipe each needs, the predicted graph. Runs none of your code |
+| `merge_flow.py` | Mode 2 step 1c: joins the CFG with the data flow — annotated diagram, cross-checks, prediction, HITL chaining |
+| `check_graph.py` | Mode 2's graph checks on a manifest your run emitted, against the prediction |
 | `isolated_cfg.py` | Mode 2 step 1: runs the CFG agents as fresh, isolated processes and checks nothing leaked |
 
 The regression suite, its fixtures, the instrumented fixtures and the manifest they

@@ -16,10 +16,3 @@ It includes third-party material, each under its own license, kept beside it:
   Derived from benhoyt/pygit (commit aa8d8bb6), Copyright (c) 2017 Ben Hoyt,
   MIT License.
   License: examples/mode2/pygit/LICENSE.txt
-
-- examples/mode2/llama/
-  Derived from meta-llama/llama (commit 689c7f26).
-  Llama 2 is licensed under the LLAMA 2 Community License, Copyright (c) Meta
-  Platforms, Inc. All Rights Reserved.
-  License: examples/mode2/llama/LICENSE
-  Acceptable Use Policy: examples/mode2/llama/USE_POLICY.md

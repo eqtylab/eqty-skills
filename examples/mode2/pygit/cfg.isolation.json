@@ -1,15 +1,15 @@
 {
-  "target": "pristine copy of mode2/targets/pygit (the upstream files listed in mode2/pygit-upstream.sha256)",
+  "target": "pristine copy of benhoyt/pygit pygit.py and LICENSE.txt (auto/pygit_before.py here)",
   "agent": "claude",
   "levels": [
     {
       "level": "L1",
       "agent": "claude",
-      "workdir": "/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l1",
-      "model": "claude-opus-5-5",
-      "claude_code_version": "2.1.282",
+      "workdir": "/var/folders/fd/8bkp5d7j4mzbrdg0x6cj6q580000gn/T/cfg-1mvb2pc7/l1",
+      "model": "claude-sonnet-5",
+      "claude_code_version": "2.1.267",
       "init": {
-        "cwd": "/private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l1",
+        "cwd": "/private/var/folders/fd/8bkp5d7j4mzbrdg0x6cj6q580000gn/T/cfg-1mvb2pc7/l1",
         "skills": [],
         "mcp_servers": [],
         "slash_commands": [],
@@ -19,16 +19,12 @@
           "Read",
           "Write"
         ],
-        "plugins": [
-          "agents-md",
-          "telemetry"
-        ]
+        "plugins": []
       },
       "tool_calls": [
-        "Glob repo/**/*",
-        "Read /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l1/repo/pygit.py",
-        "Read /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l1/repo/README.md",
-        "Write /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l1/L1.md"
+        "Glob ./repo",
+        "Read ./repo/pygit.py",
+        "Write ./L1.md"
       ],
       "outside_workdir": [],
       "checks": {
@@ -46,16 +42,16 @@
       },
       "passed": true,
       "known_residue": "account userEmail line is injected at login (not removable without an API key)",
-      "prompt": "Give me a high-level control flow diagram of what happens in this program.\n\n**Program:** the repository in `./repo/` (relative to your working directory). Read only files in that directory. Do not read any other files, do not browse the web, and do not install anything.\n\n**Budget:** about 9 boxes.\n\n**Output:** write a single Markdown file to `./L1.md` containing, in this order:\n1. One line starting `Run:` \u2014 which run of the program you diagrammed: which file or function starts it and, if the program offers several commands or entry points, the command sequence. Choose it yourself from the code.\n2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. \"`_cast()` \u2014 turn the return value into bytes\".\n3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every \"where it lives\" must name real code.\n4. Under a heading `## Other entry points`, list the runnable entry points or paths your diagram does not cover.\n\nThe deliverable is a drawn diagram, not an essay. No other prose."
+      "prompt": "Give me a high-level control flow diagram of what happens in this program.\n\n**Program:** the repository in `./repo/` (relative to your working directory). Read only files in that directory. Do not read any other files, do not browse the web, do not install anything, and do not run any of the program's code or any interpreter: read the files.\n\n**Budget:** about 9 boxes.\n\n**Output:** write a single Markdown file to `./L1.md` containing, in this order:\n1. One line starting `Run:` \u2014 exactly this line: `Run: pygit.py __main__ block, command sequence: init myrepo, then (in myrepo) add FILE..., commit -m MSG, push GIT_URL`\n2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. \"_cast() \u2014 turn the return value into bytes\". Write every node label and every edge label in double quotes (`A[\"\u2026\"]`, `A -->|\"\u2026\"| B`) and use no backticks inside the diagram.\n3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every \"where it lives\" must name real code.\n4. Under a heading `## Other entry points`, list the runnable entry points or paths your diagram does not cover.\n\nThe deliverable is a drawn diagram, not an essay. No other prose."
     },
     {
       "level": "L2",
       "agent": "claude",
-      "workdir": "/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l2",
-      "model": "claude-opus-5-5",
-      "claude_code_version": "2.1.282",
+      "workdir": "/var/folders/fd/8bkp5d7j4mzbrdg0x6cj6q580000gn/T/cfg-1mvb2pc7/l2",
+      "model": "claude-sonnet-5",
+      "claude_code_version": "2.1.267",
       "init": {
-        "cwd": "/private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l2",
+        "cwd": "/private/var/folders/fd/8bkp5d7j4mzbrdg0x6cj6q580000gn/T/cfg-1mvb2pc7/l2",
         "skills": [],
         "mcp_servers": [],
         "slash_commands": [],
@@ -65,16 +61,13 @@
           "Read",
           "Write"
         ],
-        "plugins": [
-          "agents-md",
-          "telemetry"
-        ]
+        "plugins": []
       },
       "tool_calls": [
-        "Read /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l2/L1.md",
-        "Glob repo/**/*",
-        "Read /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l2/repo/pygit.py",
-        "Write /private/var/folders/zz/zshz4j_541vcz3yxbgcxn_x80000gn/T/cfg-7soryov0/l2/L2.md"
+        "Read ./L1.md",
+        "Glob **/pygit.py",
+        "Read ./repo/pygit.py",
+        "Write ./L2.md"
       ],
       "outside_workdir": [],
       "checks": {
@@ -93,7 +86,7 @@
       },
       "passed": true,
       "known_residue": "account userEmail line is injected at login (not removable without an API key)",
-      "prompt": "Go one level deeper \u2014 show the major functions and the branches between them, but don't go into individual statements.\n\n**Program:** the repository in `./repo/` (relative to your working directory). Read only files in that directory, plus `./L1.md`. Do not read any other files, do not browse the web, and do not install anything.\n\n**One level up:** the high-level diagram for this program is `./L1.md`. Go one level deeper than that, on the same run:\n\nRun: `pygit.py` `__main__` block, command sequence `init myrepo` \u2192 (cd myrepo) `add FILE...` \u2192 `commit -m MSG` \u2192 `push GIT_URL` (the create-repo-and-push-to-GitHub workflow from the README).\n\n**What a box is:** a major function, or a branch between major functions. Individual statements are not boxes; if a box would be one line of code, it belongs inside its caller. Draw branches as decision nodes with labelled edges.\n\n**Budget:** about 30 boxes.\n\n**Output:** write a single Markdown file to `./L2.md` containing, in this order:\n1. One line starting `Run:` \u2014 the same `Run:` line as the high-level diagram, verbatim.\n2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. \"`_cast()` \u2014 turn the return value into bytes\".\n3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every \"where it lives\" must name real code.\n\nThe deliverable is a drawn diagram, not an essay. No other prose."
+      "prompt": "Go one level deeper \u2014 show the major functions and the branches between them, but don't go into individual statements.\n\n**Program:** the repository in `./repo/` (relative to your working directory). Read only files in that directory, plus `./L1.md`. Do not read any other files, do not browse the web, do not install anything, and do not run any of the program's code or any interpreter: read the files.\n\n**One level up:** the high-level diagram for this program is `./L1.md`. Go one level deeper than that, on the same run:\n\nRun: pygit.py __main__ block, command sequence: init myrepo, then (in myrepo) add FILE..., commit -m MSG, push GIT_URL\n\n**What a box is:** a major function, or a branch between major functions. Individual statements are not boxes; if a box would be one line of code, it belongs inside its caller. Draw branches as decision nodes with labelled edges.\n\n**Budget:** about 30 boxes.\n\n**Output:** write a single Markdown file to `./L2.md` containing, in this order:\n1. One line starting `Run:` \u2014 the same `Run:` line as the high-level diagram, verbatim.\n2. The diagram as a Mermaid `flowchart TD` code block. Box labels are short: a function name and a half-sentence, e.g. \"_cast() \u2014 turn the return value into bytes\". Write every node label and every edge label in double quotes (`A[\"\u2026\"]`, `A -->|\"\u2026\"| B`) and use no backticks inside the diagram.\n3. A table with one row per box: `box id | label | where it lives (file:function or file:line range) | what it does`. Every box must have a row, and every \"where it lives\" must name real code.\n\nThe deliverable is a drawn diagram, not an essay. No other prose."
     }
   ]
 }

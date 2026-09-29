@@ -15,7 +15,8 @@ required step.
 
 **What the manifest is provenance *of*.** Not only the run's data flow — **the
 repo's own code**. Every computation carries a `Code` asset hashed from the
-source of the function that ran, so a reader can hold the manifest against the
+source of the function that ran (`@compute` hashes it; a builder is given it,
+`references/eqtysdk.md` §6.11), so a reader can hold the manifest against the
 repository and check that the code it names is the code that is there. That is
 why instrumentation is always an edit to the target's existing files: a decorator
 applied to a new adapter function attests the adapter, the repo's real code goes
@@ -42,6 +43,17 @@ rules, detailed in `references/eqtysdk.md` **§6.10**:
 
 What still cannot be recorded, such as `Custom` nodes or a missing edge, is
 reported as a gap.
+
+**Never run the user's code.** Not the target, not its tests, not an example
+script, not an import of one of its modules (an import runs its top-level code),
+not even to check your own patch. A run can train a model, call a paid API, spend
+GPU hours or write where it shouldn't, and none of that is yours to start. This
+skill reads code and writes a patch, and it doesn't ask the user to run it either:
+the instrumented code often runs only once deployed, maybe much later, in a cloud
+environment. What it can read is best effort: the skill's own scripts
+(`detect.py`, `static_flow.py`, `isolated_cfg.py`) and pyright read the source,
+and anything they can't settle is stated as an assumption in the patch. Running `check_graph.py` or the `eqty-manifest` scripts
+on a manifest someone hands you is reading, not running their code.
 
 **The output is a patch, not a commit.** Instrumentation lands in the working
 tree on a branch. A human reviews it and decides. Say so when you finish, and
@@ -204,8 +216,8 @@ deployment-model limitation, not a handler one, and covering it needs a hook the
 runtime exposes. **Say so plainly rather than emitting an empty plan** — that is
 what the detector's non-zero exit is for.
 
-A module-level graph with no invoke is the recoverable version of this: import it
-and drive it yourself from a script that *does* have a call site.
+A module-level graph with no invoke is the recoverable version of this: write a
+script that imports it and *does* have a call site, for the user to run.
 
 **Backend affects completeness, not success.** Nothing errors and nothing is
 misrecorded; recording is silently less complete as you move down:
@@ -216,11 +228,26 @@ misrecorded; recording is silently less complete as you move down:
 | **B** | `FilesystemBackend` | files via tool arguments; records the **virtual** path the agent saw |
 | **C** | `CompositeBackend` / sandbox | as B, plus `execute` as an ordinary tool computation, with the cache-drop caveat above |
 
-## 6. Verify what you emitted, then hand off
+## 6. Hand off: what the user runs, and how they check it
 
-An instrumented repo is not done until a manifest has come out of it and been
-checked. Run it and export. If the companion `eqty-manifest` skill is installed,
-put the result through it:
+You don't run the instrumented code (see *Never run the user's code* above), so
+no manifest comes out of this skill. **Don't ask the user to run it, and don't
+wait for a manifest.** The instrumented code often runs only once it is deployed,
+in a cloud environment that may not exist yet. Finish when the patch is
+delivered. The patch carries, as documentation for whoever runs it later:
+
+- **The command that runs it,** and the manifest path that run will write.
+  Mode 1: the app's own entry point, which now exports. Mode 2: the target's
+  entry point or the `run_example.py` step 5 writes.
+- **The prediction:** the computations the run should record (Mode 1: one per
+  graph node, model call and tool call on the path the user will exercise;
+  Mode 2: the count and components step 3 writes down), so a wrong placement
+  shows up as a mismatch rather than passing unnoticed.
+- **The checks to run on that manifest,** listed below. If a manifest is ever
+  handed to you, running them is fine: they read the manifest and execute none
+  of the target's code.
+
+If the companion `eqty-manifest` skill is installed, the checks are:
 
 ```sh
 uv run <skill-dir>/../eqty-manifest/summary.py <manifest>                     # every check in one block; exit 0 / 1 / 2
@@ -229,8 +256,8 @@ uv run <skill-dir>/../eqty-manifest/parse_manifest.py <manifest> timeline     # 
 uv run <skill-dir>/../eqty-manifest/verify_credentials.py <manifest>          # do the signatures verify
 ```
 
-If it is not installed, say so, name the manifest path, and leave these checks to
-the user. Either way, the three things to check, in this order:
+If it is not installed, say so and leave these checks to the user. Either way,
+the three things to check, in this order:
 
 1. **Structure** — the computations carry recognisable names, and the file /
    plan / subagent chains are present for the backend class you're in.
@@ -283,9 +310,11 @@ too late; the fix belongs in the exporter. Anything derived *from* the manifest
 — reports, narratives, timelines — is the read side's business, and it writes
 one file too.
 
-**Handoff.** Finish by naming the manifest path you produced. `eqty-manifest` is
-the separate skill that interprets, verifies and reports on it — mention it as an
-option if the user wants to go further, but do not assume they do.
+**Handoff.** Finish by naming the command, the manifest path the run will write,
+and the prediction it should match. Say plainly that nothing was run, so the
+patch is unverified until it runs where it is deployed. `eqty-manifest` is the separate skill
+that interprets, verifies and reports on the manifest — mention it as an option,
+but do not assume the user wants it.
 
 **Deliver the change as a pull request when the repo has a remote.** The branch is
 where the change already lives; a pull request is how a reviewer reads it. Push the
@@ -293,8 +322,9 @@ branch and open one against the repo's default branch. Never commit to that bran
 and never merge your own pull request — the human decides, which is the whole point
 of shipping a proposal rather than a result.
 
-Keep the body factual: what you instrumented, the manifest path the app will now
-write, and the versions you ran against. Attach the review checklist from
+Keep the body factual: what you instrumented, the command that runs it, the
+manifest path it will write, the prediction, the versions you instrumented
+against, and that nothing was run. Attach the review checklist from
 `references/mode1.md` or `references/mode2.md`. **Do not summarise your own diff.** A reviewer is reading it
 to judge whether the edit is right, and your account of it is not evidence — three
 of the rules in §4 fail quietly, so a wrong edit describes itself just as
@@ -315,5 +345,7 @@ do not open a pull request against a repository you were not pointed at.
 | `references/mode2ideas.md` | Mode 2 step 3 — which operations become nodes |
 | `references/upstream/` | the `eqty-lineage` originals Mode 1 cites by `file:line`, verbatim, with `SOURCES.md` |
 | `detect.py` | stdlib-only AST scan → JSON edit plan + human summary |
-| `check_graph.py` | Mode 2's post-run graph checks on an emitted manifest |
+| `static_flow.py` | Mode 2's data-flow report, read from the source (pyright for types when installed, else the stdlib AST): hand-offs, types, the §6.11 recipe each needs, the predicted graph. Runs none of the target's code |
+| `merge_flow.py` | Mode 2 step 1c: joins the blind CFG with `static_flow.py`'s report — the annotated diagram, cross-checks, the prediction, and HITL chaining (`--pick`) |
+| `check_graph.py` | Mode 2's graph checks on a manifest the user's run emitted, against the prediction |
 | `isolated_cfg.py` | Mode 2 step 1: runs the L1 and L2 CFG agents as fresh, isolated `claude -p` or `codex exec` processes and checks nothing leaked |

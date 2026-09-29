@@ -114,14 +114,13 @@ Or ask Claude about it — *"what does this manifest show?"* — and
 
 ## Examples
 
-[`examples/`](examples/) holds real runs of both modes, for people to read; the
-agent does not use them. Each changed file is there as `*_before.py` and
-`*_after.py`, with `changes.diff` between them. The Mode 2 runs (pygit and llama,
-auto and HITL) also carry the control-flow graph both modes selected from
-(`cfg.html`, with `cfg.isolation.json` showing its agents were isolated), the
-node selection and placement notes, the emitted manifest, and the
-`eqty-manifest` report on it. More on the skill in
-[`docs/eqty-instrument.md`](docs/eqty-instrument.md).
+[`examples/`](examples/) holds runs of both modes, for people to read; the agent
+does not use them. Start with [`examples/README.md`](examples/README.md). The
+Mode 1 examples show the current edit. The Mode 2
+examples, [`lora_banking77`](examples/mode2/lora_banking77) and
+[`pygit`](examples/mode2/pygit), show the current flow: blind CFG, data flow read
+with pyright, the two joined, the node selection, the patch and the prediction,
+with nothing run. More on the skill in [`docs/eqty-instrument.md`](docs/eqty-instrument.md).
 
 ## Known limitations
 
