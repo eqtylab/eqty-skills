@@ -44,6 +44,7 @@ RECIPES = {
     ("torch", "Module"): "torch-module",
     ("numpy", "ndarray"): "numpy-array",
     ("pandas", "DataFrame"): "pandas-frame",
+    ("openai", "ChatCompletion"): "model-call",
     ("builtins", "tuple"): "tuple-return",
     ("builtins", "set"): "set",
     ("builtins", "frozenset"): "set",
@@ -681,13 +682,17 @@ class Program:
             for r, place2, rw2 in literal:
                 if rw == "w" and rw2 == "r" and place == place2 and w != r:
                     self.file_edges.add((w, r, place.removeprefix("literal ")))
+        def rets(f):   # the body's return types; pyright's signature for a return the body can't type
+            t = from_pyright(self.pytypes.get((f.module.rel, f.name))) if "?" in f.ret_types else None
+            return (f.ret_types - {"?"}) | {t} if t else f.ret_types
+
         def breaks(f):
             why = []
             for p in f.params:
                 for t in sorted(f.param_types.get(p, ())):
                     if p not in ("self", "cls") and hashable(t) is False:
                         why.append(f"can't hash {p}: {t} (§7.1){recipe_of(t)}")
-            for t in sorted(f.ret_types):
+            for t in sorted(rets(f)):
                 if hashable(t) is False:
                     why.append(f"can't hash the {t} it returns (§6.2){recipe_of(t)}")
             if not f.returns_value and not f.generator:
@@ -709,7 +714,7 @@ class Program:
                            "reached": d in self.reached} for d, f in sorted(self.fns.items())],
             "steps": [{"name": f.name, "where": f.where, "call_sites": f.call_sites, "loop_body": f.in_loop,
                        "returned_none": not f.returns_value and not f.generator,
-                       "returns": sorted(f.ret_types), "mutated": sorted(f"{p} ({c})" for p, c in f.mutates.items()),
+                       "returns": sorted(rets(f)), "mutated": sorted(f"{p} ({c})" for p, c in f.mutates.items()),
                        "path_args": sorted(f.path_params), "io": sorted(map(list, f.io)),
                        "breaks": breaks(f), "unproduced": sorted(f.unproduced), "calls": sorted(f.calls)}
                       for f in steps],

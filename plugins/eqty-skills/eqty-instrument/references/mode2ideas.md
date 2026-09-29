@@ -15,7 +15,7 @@ Six archetypes always, three when they're the named stage, everything else never
 ## Always instrument
 
 - **Ingest** — outside world becomes an in-process value: `load_csv(path)`, `fetch(url)`, `db.query(sql)`. This is where trust enters and it's the root of the DAG. Skip it and the graph has no provenance floor.
-- **Model / oracle call** — `call_llm()`, `model.predict()`, `embed()`. Nondeterministic and the thing people actually question.
+- **Model / oracle call** — `call_llm()`, `model.predict()`, `embed()`. Nondeterministic and the thing people actually question. Over HTTP, hash the wire bodies: recipe `model-call`, `eqtysdk.md` §6.11.
 - **Fit / train** — `train()`, `fit()`, `optimize()`. Nondeterministic, produces the artifact.
 - **Aggregate / reduce** — `fedavg(updates)`, `merge(shards)`, `vote(results)`. N inputs → 1 output. Highest value per node in the whole graph, because it's the only place lineage genuinely branches.
 - **Emit** — `save_model()`, `write_report()`, `publish()`. The artifact leaves the process; this is what someone downstream is holding.

@@ -627,6 +627,7 @@ Four rules. The first three make the edges form; the fourth keeps the code:
 | `set` / `bytes` | built-ins §7.1 rejects | a set as a sorted list; bytes straight to `get_cid_for_bytes` | stored | — |
 | `none-return` | an emitter that writes a file and returns `None` | the file it wrote, via `from_path`, after the write | stored unless heavy | ✓ |
 | `path-arg` | a parameter holding a path | the file's bytes at the point it is read or written (§6.7), never the path text | stored unless heavy | ✓ |
+| `model-call` | a hosted model called over HTTP, e.g. `client.chat.completions.create(...)` returning `openai.ChatCompletion` | the HTTP request and response **bodies as they crossed the wire**, never a re-serialization of `messages` or of the parsed reply. See *Model calls* below. | stored; it holds the prompt and the reply, so by reference when those are sensitive | not exercised: read from the `openai` 2.45.0 source, the pattern below type-checked with pyright |
 
 The pattern, from the LoRA example (`examples/mode2/lora_banking77/` in the eqty-skills repository):
 
@@ -653,6 +654,52 @@ development (2026-09-28); the skill itself runs nothing. Uninstrumented, bare
 emitted one connected graph: 8 computations (`tokenize`
 runs twice), and 36 of its 39 hashes verified. The other three are declared by
 reference: the base weights and the two source splits.
+
+**Model calls.** Hash the body bytes the client sent and received, with
+`get_cid_for_bytes`. Those are what vNIM hashes for its `Request Body` and
+`Response Body` assets, so when the model is served through vNIM the two
+manifests share those nodes. A body rebuilt from parsed data (`json.dumps(messages)`,
+the reply's `model_dump()`) is a different document with a different CID, and
+forks the lineage instead of joining it. This is the convention the eqty-lineage
+handlers follow (`eqtylab/eqty-lineage` `d1e4475`).
+
+With the OpenAI Python SDK, `with_raw_response` returns the `httpx.Response`, and
+the request the SDK sent hangs off it:
+
+```python
+def ask(client, question):
+    raw = client.chat.completions.with_raw_response.create(
+        model=MODEL, messages=[{"role": "user", "content": question}])
+    reply = raw.parse()                              # the ChatCompletion the code used before
+    run = sdk.Computation.new(name="Ask the model", computation_type="inference", _store=True)
+    run.add_input_cid(sdk.Code.from_object(inspect.getsource(ask), name="ask", _store=True).cid)
+    # plus the upstream value the prompt came from, by its own recipe (consumer: the CID only)
+    body = raw.http_response.request.content         # the bytes the SDK serialized and sent
+    run.add_input_cid(sdk.Document.from_cid(sdk.get_cid_for_bytes(body, _store=True),
+                                            name="Model request body").cid)
+    body = raw.http_response.content                 # the reply's bytes
+    run.add_output_cid(sdk.Document.from_cid(sdk.get_cid_for_bytes(body, _store=True),
+                                             name="Model response body").cid)
+    text = reply.choices[0].message.content
+    run.add_output_cid(sdk.Document.from_object(text, name="Answer", _store=True).cid)  # what callers use
+    run.finalize()
+    return text
+```
+
+- **Two outputs:** the response body, which joins vNIM, and the value the function
+  returns, by its own recipe, which is what the next step consumes. Neither stands
+  in for the other.
+- **Never record headers.** They carry the API key. The bodies don't.
+- **Streaming** (`stream=True`): the request body is still
+  `raw.http_response.request.content`, but the stream reads the response without
+  keeping it. Capturing it needs a tee on the client's HTTP transport, as
+  `eqty-lineage-vnim` does. Without one, record the request and report the
+  response edge as a gap.
+- **Limits, not checked:** `http_response.content` is the body after httpx undoes
+  any `Content-Encoding`, and whether that equals vNIM's `Response Body` has not
+  been checked against a vNIM manifest. Other SDKs built the same way (Anthropic's
+  `client.messages.with_raw_response`) should follow the same pattern; that has
+  not been checked here either.
 
 **Recommendation:** hashing a dataset or a model state costs a full
 serialization. Where that is too slow for real use, hash at the ingest and the

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.1 — 2026-09-29
+
+- **eqty-instrument** — Mode 2 now says how to record a call to a hosted model.
+  The new `model-call` recipe (`references/eqtysdk.md` §6.11) hashes the HTTP
+  request and response bodies as they crossed the wire, never a body rebuilt from
+  `messages` or the parsed reply. Those are the bytes vNIM hashes for its
+  `Request Body` and `Response Body`, so when the model is served through vNIM the
+  two manifests share those nodes; eqty-lineage's handlers follow the same
+  convention. With the OpenAI SDK the bytes come from `with_raw_response`. A
+  streamed response needs a tee on the HTTP transport, or its edge is reported as
+  a gap.
+- `static_flow.py` names the recipe for an `openai.ChatCompletion` hand-off. A
+  function that returns a value the pass can't type on its own now takes pyright's
+  type for it, as its callers already did.
+
 ## 0.2.0 — 2026-09-29
 
 - **eqty-instrument never runs your code.** Not the program, its tests, its
