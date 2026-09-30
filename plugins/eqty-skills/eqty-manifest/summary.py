@@ -146,6 +146,10 @@ def _credential_issues(c, sid):
         out.append(("failed", "Malformed credential", "Malformed credential for %s%s" % (c["label"], reg)))
     elif c["sig_valid"] is False:
         out.append(("failed", "Signature failed", "Signature validation failed for %s%s" % (c["label"], reg)))
+    elif c["sig_valid"] is None and c["reason"] in ("expired", "not_yet_valid"):
+        out.append(("unchecked", "Signature not checked", "Signature not checked for %s: the credential %s %s, "
+                    "and the SDK checks dates before the signature" % (
+                        c["label"], "expired" if c["reason"] == "expired" else "is not valid until", c["found"])))
     elif c["sig_valid"] is None:
         why = "%s: %s" % (c["reason"], c["found"]) if c.get("found") else c["reason"]
         out.append(("unchecked", "Signature not checked", "Signature not checked for %s (%s)" % (

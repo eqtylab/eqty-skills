@@ -132,6 +132,7 @@ as failed:
 
 | reason | when | `found` |
 |---|---|---|
+| `expired` / `not_yet_valid` | now is after `validUntil` / before `validFrom`. The SDK checks those dates before the proof and stops there, so the signature was **not checked**: an expired credential is not a failed one, and this says nothing about whether it was valid when issued. Checked first, and only for credentials without `issuanceDate`, which the SDK's legacy path verifies signature first | the date |
 | `unsupported_proof_type` | the proof type is not one the SDK is known to verify (table above) | the proof type |
 | `alg_mismatch` | the JWS header's `alg` disagrees with the proof type | the header's `alg` |
 | `key_type_mismatch` | the signing `did:key` is a different key type than the proof type uses | the key type |
@@ -162,7 +163,7 @@ Each result is `{"valid": true, "keyType": ...}`,
 `subject_mismatch`, or `malformed_credential` — a credential that does not
 parse is a defect in the file, not an unchecked one), or
 `{"valid": null, "reason": ..., "detail": ...}` for something that couldn't
-be checked at all (`unsupported_proof_type`, `alg_mismatch`,
+be checked at all (`expired`, `not_yet_valid`, `unsupported_proof_type`, `alg_mismatch`,
 `key_type_mismatch`, `unrecognized_context` — see above —
 `unresolvable_signing_key` — a DID method needing the network — `no_proof`,
 `no_signature`, `verifier_error`).
@@ -296,7 +297,7 @@ signature, and — for TDX — that the attestation key is bound to the QE repor
 are checked in four parts, each reported separately:
 
 1. **Quote signature** — the quote verifies under the evidence's `AKPublicKey`
-   (RSASSA or RSA-PSS over SHA-256/384).
+   (RSASSA, RSA-PSS or ECDSA over SHA-256/384).
 2. **PCR claim** (`bound_pcr_claim_to_quote`) — the PCR values the credential's
    `identity.pcr` claims hash to the digest the TPM signed.
 3. **Hardware binding** — the attestation key is trusted *only* through a

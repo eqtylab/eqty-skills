@@ -63,6 +63,7 @@ import sys
 import os
 import json
 import base64
+from datetime import datetime, timezone
 
 try:
     import eqty_sdk
@@ -217,6 +218,42 @@ SDK_CONTEXTS = {
 }
 
 
+def _instant(value):
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+
+
+def outside_validity(credential: dict, now=None):
+    """After `verify_vc` says False: is the credential outside its validity
+    period? Returns (reason, found, detail) or None.
+
+    eqty_sdk checks `validFrom` / `validUntil` before the proof and stops at
+    the first failure (ssi validates claims, then proofs), so for such a
+    credential the signature was never checked. It reads NOT CHECKED, with the
+    date, rather than "unsupported" or "failed". A credential with
+    `issuanceDate` takes the SDK's legacy path, which checks the signature
+    first, so it is left to the other checks. Dates are signed fields; the
+    worst a tamperer gains by editing one is "not checked"."""
+    if "issuanceDate" in credential:
+        return None
+    now = now or datetime.now(timezone.utc)
+    start, end = _instant(credential.get("validFrom")), _instant(credential.get("validUntil"))
+    if end and now > end:
+        reason, found, state = "expired", credential["validUntil"], "expired at %s" % credential["validUntil"]
+    elif start and now < start:
+        reason, found, state = "not_yet_valid", credential["validFrom"], "is not valid until %s" % credential["validFrom"]
+    else:
+        return None
+    return (reason, found,
+            "The credential %s (valid from %s to %s). eqty_sdk checks a credential's "
+            "dates before its signature and stops there, so the signature was not "
+            "checked: this says nothing about whether it was valid when issued. "
+            "Unchecked, not forged." % (state, credential.get("validFrom") or "an unstated start",
+                                        credential.get("validUntil") or "no end"))
+
+
 def why_uncheckable(credential: dict, contexts=None, key_type=None):
     """After `verify_vc` says False: is that because the SDK cannot check this
     credential at all? Returns (reason, found, detail) or None.
@@ -349,7 +386,7 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None)
                            "checked against statement %r. A valid signature "
                            "over another subject says nothing about this "
                            "statement." % (subject, statement_id))
-    uncheckable = why_uncheckable(credential, contexts, result.get("keyType"))
+    uncheckable = outside_validity(credential) or why_uncheckable(credential, contexts, result.get("keyType"))
     if uncheckable:
         reason, found, why = uncheckable
         return dict(result, valid=None, reason=reason, found=found, detail=why)

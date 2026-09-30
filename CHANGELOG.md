@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.3 — 2026-09-30
+
+- **eqty-manifest** — an expired credential now reads *not checked* with its
+  expiry date, not "unsupported proof type". The SDK checks a credential's
+  `validFrom` / `validUntil` before its signature and stops there, so the
+  signature of an expired credential is never checked; the summary says so
+  instead of guessing at the proof type. A short-lived OpenShell sandbox
+  attestation (`DataIntegrityProof`, valid for ten minutes) was the case that
+  showed it. Whether an expired credential was valid when issued still can't be
+  told: that needs the SDK to verify at a given time.
+- **eqty-manifest** — TPM quotes signed with ECDSA (TPM scheme `0x18`) are now
+  checked, alongside RSASSA and RSA-PSS. On the OpenShell manifest the quote's
+  signature, PCR claim and key binding now verify. The attestation key is still
+  unauthenticated without a pinned TPM root or a verified hardware report that
+  vouches for it, and the summary says so.
+- **README** — how to update the plugin in Claude Code and Codex.
+
 ## 0.2.2 — 2026-09-29
 
 - **eqty-instrument** — the patched program chooses its signer when it starts: the

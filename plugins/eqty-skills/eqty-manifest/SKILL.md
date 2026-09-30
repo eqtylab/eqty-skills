@@ -221,6 +221,9 @@ How to read it:
 - **A signature the SDK cannot check reads *not checked*, never failed**, with
   the reason and what was found — e.g. `(unsupported_proof_type:
   RsaSignature2018)`. That is unknown, not forged (`references/verification.md`).
+  A credential past its `validUntil` reads *not checked* with the date: the SDK
+  checks dates before the signature, so say it expired, and don't say its
+  signature was valid or invalid.
 - **Signers** also reports whether each credential's `issuer` is its
   registration's `registeredBy`. A mismatch is a failure.
 - **Execution environment** checks that every `executedOn` names a system the

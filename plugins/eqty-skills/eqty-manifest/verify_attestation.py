@@ -345,7 +345,7 @@ def _summarize(checks, parsed, kind):
 TPM_GENERATED = 0xFF544347
 TPM_ST_ATTEST_QUOTE = 0x8018
 TPM_ALG = {0x000B: hashes.SHA256, 0x000C: hashes.SHA384} if x509 else {}
-TPM_ALG_RSASSA, TPM_ALG_RSAPSS = 0x0014, 0x0016
+TPM_ALG_RSASSA, TPM_ALG_RSAPSS, TPM_ALG_ECDSA = 0x0014, 0x0016, 0x0018
 
 
 def _tpm2b(b, i):
@@ -458,13 +458,19 @@ def verify_tpm(quote: bytes, signature: bytes, ak_pem: bytes, claimed_pcrs=None,
         from cryptography.hazmat.primitives import serialization
         ak = serialization.load_pem_public_key(ak_pem)
         sig_alg, hash_alg = struct.unpack_from(">HH", signature, 0)
-        sig, _ = _tpm2b(signature, 4)
-        pad = (padding.PKCS1v15() if sig_alg == TPM_ALG_RSASSA else
-               padding.PSS(padding.MGF1(TPM_ALG[hash_alg]()), padding.PSS.AUTO) if sig_alg == TPM_ALG_RSAPSS else None)
-        if pad is None or hash_alg not in TPM_ALG:
+        if sig_alg not in (TPM_ALG_RSASSA, TPM_ALG_RSAPSS, TPM_ALG_ECDSA) or hash_alg not in TPM_ALG:
             return {"valid": None, "reason": "unsupported_signature_scheme",
                     "detail": "TPM signature scheme %#x / hash %#x is not supported" % (sig_alg, hash_alg)}
-        ak.verify(sig, quote, pad, TPM_ALG[hash_alg]())
+        h = TPM_ALG[hash_alg]()
+        if sig_alg == TPM_ALG_ECDSA:      # TPMS_SIGNATURE_ECDSA: signatureR, then signatureS
+            r, i = _tpm2b(signature, 4)
+            s_, _ = _tpm2b(signature, i)
+            ak.verify(utils.encode_dss_signature(int.from_bytes(r, "big"), int.from_bytes(s_, "big")),
+                      quote, ec.ECDSA(h))
+        else:
+            sig, _ = _tpm2b(signature, 4)
+            ak.verify(sig, quote, padding.PKCS1v15() if sig_alg == TPM_ALG_RSASSA else
+                      padding.PSS(padding.MGF1(h), padding.PSS.AUTO), h)
         checks.append({"check": "quote_signed_by_ak", "passed": True, "detail": None})
     except Exception as e:
         checks.append({"check": "quote_signed_by_ak", "passed": False, "detail": type(e).__name__})

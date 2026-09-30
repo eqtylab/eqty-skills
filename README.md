@@ -44,6 +44,27 @@ sibling):
 cp -R plugins/eqty-skills/eqty-manifest plugins/eqty-skills/eqty-instrument ~/.claude/skills/    # or ~/.agents/skills/ for Codex
 ```
 
+### Update
+
+New versions are listed in [`CHANGELOG.md`](CHANGELOG.md). After updating,
+restart the agent so it loads the new skills.
+
+**Claude Code** — refresh the marketplace, then update the plugin:
+
+```sh
+claude plugin marketplace update eqty-lab
+claude plugin update eqty-skills@eqty-lab
+```
+
+**Codex** — refresh the marketplace, which updates the plugin from it:
+
+```sh
+codex plugin marketplace upgrade eqty-lab
+```
+
+`claude plugin list` and `codex plugin list` show the installed version.
+**Manually**, copy the two skill directories again, over the old ones.
+
 Each skill is self-contained: its directory carries everything its `SKILL.md`
 tells an agent to read or run, and refers to its own files relative to that
 directory. An install copies `plugins/eqty-skills/` and nothing else: the two
