@@ -83,7 +83,8 @@ Order matters:
 | `Signer.load_or_create(name=..., algorithm=...)` | Reuse the named signer, or create it; the algorithm applies only when creating. |
 | `Signer.new(name=..., _load_if_exists=True)` | Legacy reuse option; emits a `DeprecationWarning`. Prefer `load_or_create`. |
 | `Signer.from_private_key(algorithm, private_key, ...)` | Import a base64-encoded private key; `algorithm` must match the key. |
-| `Signer.auth_service(...)` / `Signer.vcomp_notary(...)` | Service-backed signers with their own setup requirements. |
+| `Signer.auth_service(...)` | Service-backed signer; needs `EQTY_API_KEY`. |
+| `Signer.vcomp_notary(url=None, name=None, _load_if_exists=False)` | Registers with the VComp notary at `url` over the network and persists the signer. `url` defaults to `http://docker.eqtylab.internal:8066`, a fixed host, not discovery. `_load_if_exists=True` reuses the signer saved under `name`, whatever kind it is. |
 
 Supported local algorithms are `ED25519`, `SECP256K1`, and `SECP256R1`; `new()`
 defaults to Ed25519. `signer.did_key` exposes its DID. An unnamed signer is stored
@@ -91,6 +92,31 @@ under its DID string. `load()` and `load_or_create()` were added in **2.3.0**.
 `set_active_signer()` reloads the key by name from the current SDK directory, so it
 fails for a signer persisted elsewhere. [Sources: signer implementation][signers],
 [signer tests][signer-tests], [changelog][changelog].
+
+**Choose the signer when the program starts, not when you instrument it.**
+Whether a VComp notary is available is a fact about where the program is deployed,
+and reading the code can't tell. So the patch reads it from the environment:
+
+```python
+notary = os.environ.get("EQTY_NOTARY_URL")   # set where a VComp notary runs
+signer = (sdk.Signer.vcomp_notary(url=notary, name="example-signer-notary", _load_if_exists=True)
+          if notary else sdk.Signer.load_or_create(name="example-signer"))
+sdk.set_active_signer(signer)
+```
+
+- **`EQTY_NOTARY_URL` is the switch.** It is the name existing EQTY VComp pod
+  specs already set. When it is unset, the program signs with a local key, as
+  before.
+- **Pass the URL explicitly.** The SDK's default host is fixed, so calling
+  `vcomp_notary()` without a URL doesn't find a notary.
+- **Give the notary signer its own name.** `_load_if_exists=True` loads whatever
+  is saved under the name, so a name shared with the local key hands back the
+  local key.
+- **No fallback.** When the variable is set and the notary can't be reached,
+  `vcomp_notary` raises. Let it. A fallback to the local key would emit a
+  manifest with no hardware evidence that looks like the run that was asked for.
+- **With the notary,** `operatedBy` is the notary's DID (§5), and every export
+  carries its credentials and DID blobs (§8), which `eqty-manifest` verifies.
 
 **The SDK does not impose one identity per process.** `set_active_signer()` loads
 the selected signer and updates process-global configuration. Sequential switching

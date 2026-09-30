@@ -25,12 +25,15 @@ inference.
 ## The edit, in one block
 
 ```python
+import os
 from eqty_sdk import Context, Signer, init, set_active_signer
 from eqty_lineage.deepagents import EqtyDeepAgentsHandler, eqty_tool
 # LangChain / LangGraph: from eqty_lineage.langchain import EqtyCallbackHandler, eqty_tool
 
 cfg = init(default_context=Context.new("Deep Research")).set_store_all_blobs(True)
-set_active_signer(Signer.load_or_create(name="deep_research"))
+notary = os.environ.get("EQTY_NOTARY_URL")   # a VComp notary where the deployment has one: eqtysdk.md §2
+set_active_signer(Signer.vcomp_notary(url=notary, name="deep_research-notary", _load_if_exists=True)
+                  if notary else Signer.load_or_create(name="deep_research"))
 
 result = agent.invoke(
     {"messages": [{"role": "user", "content": question}]},

@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.2 — 2026-09-29
+
+- **eqty-instrument** — the patched program chooses its signer when it starts: the
+  VComp notary when `EQTY_NOTARY_URL` is set, a local key otherwise. Whether a
+  notary is available depends on where the program is deployed, which reading the
+  code can't tell, so the same patch now works on a laptop and inside a VComp
+  environment. When the variable is set and the notary can't be reached, the
+  program fails rather than signing with a local key, which would emit a manifest
+  with no hardware evidence. With the notary, the operator is the notary's DID and
+  every export carries its credentials. The rules are in
+  `references/eqtysdk.md` §2, and `prediction.md` says which signer the run
+  will use.
+
 ## 0.2.1 — 2026-09-29
 
 - **eqty-instrument** — Mode 2 now says how to record a call to a hosted model.

@@ -490,8 +490,10 @@ That allows, for example:
   function reads or writes it. This is how a hand-off through the filesystem, like
   `add` writing `.git/index` and `commit` reading it, gets an **observed** edge;
 - initialising the SDK and a signer in the target's own entry point, so the
-  shipped program records its own runs. Keep the SDK directory, and with it the
-  signer's private key, out of the user's tracked files.
+  shipped program records its own runs. The signer is the VComp notary when
+  `EQTY_NOTARY_URL` is set and a local key otherwise (`references/eqtysdk.md` §2).
+  Keep the SDK directory, and with it the signer's private key, out of the user's
+  tracked files.
 
 It forbids:
 
@@ -551,6 +553,9 @@ Write `<target>.<mode>.prediction.md`, and put the same in the patch. It holds:
   path it writes;
 - **the prediction** from step 3: computation count, component count, roots and
   shape, from `static_flow.py`'s report restricted to the selected nodes;
+- **the signer:** the VComp notary where the deployment sets `EQTY_NOTARY_URL`,
+  so `operatedBy` is the notary's DID and the manifest carries its hardware
+  credentials; a local key where it doesn't;
 - **the assumptions:** every fact the static pass marked `likely` or `unknown`
   that the placement rests on, each with what the patch assumed, so the user
   knows what their run is testing;
@@ -716,6 +721,7 @@ procedure, not by reading the SDK.
 - [ ] The target repo's dependency file declares `eqty_sdk==<version>`.
 - [ ] `Custom` nodes, generated names, path-text inputs, identifier inputs and missing edges that remain are **listed as reported gaps**.
 - [ ] The SDK directory the entry point initialises, with its signer key, is outside the user's tracked files.
+- [ ] The signer is chosen at start-up: the VComp notary when `EQTY_NOTARY_URL` is set, with no fallback if it can't be reached; otherwise a local key under a different name.
 - [ ] Every node's `computation_type` metadata is set.
 - [ ] Every `_store=False` registration carries `storage="by-reference"` and a `storage_reason`, is a heavy artifact by what the target loads in real use, and is listed as a gap. Nothing else is `_store=False`.
 - [ ] Stubs and the example use relative paths, so no blob of the user's manifest will hold an absolute path or a user name (`references/eqtysdk.md` §11).
