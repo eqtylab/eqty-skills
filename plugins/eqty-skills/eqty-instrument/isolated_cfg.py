@@ -56,6 +56,12 @@ L1_PROMPT = "Give me a high-level control flow diagram of what happens in this p
 L2_PROMPT = ("Go one level deeper — show the major functions and the branches between them, "
              "but don't go into individual statements.")
 
+# What the diagram is for, told in plain words (none of LEAK_WORDS), after the fixed prompt at both levels.
+# It makes independent agents draw more alike diagrams (mode2/experiments/cfg-021-8x-2026-09-29).
+PURPOSE = ("What it's for: someone will use this diagram to answer, for any output the program produces, "
+           "\"where did this come from?\" — which files were loaded, which inputs and settings shaped it, "
+           "and which steps transformed it. Diagram the run of the program that makes those dependencies most visible.")
+
 PROGRAM = ("**Program:** the repository in `./repo/` (relative to your working directory). "
            "Read only files in that directory{extra}. Do not read any other files, do not browse "
            "the web, do not install anything, and do not run any of the program's code or any "
@@ -306,7 +312,7 @@ def main():
     l1_dir = os.path.join(base, "l1")
     copy_repo(repo, os.path.join(l1_dir, "repo"))
     path_rule = (f"exactly this line: `Path: {args.path}`" if args.path else L1_PATH_RULE)
-    l1_prompt = "\n\n".join([L1_PROMPT, PROGRAM.format(extra=""), "**Budget:** about 9 boxes.",
+    l1_prompt = "\n\n".join([L1_PROMPT, PURPOSE, PROGRAM.format(extra=""), "**Budget:** about 9 boxes.",
                              OUTPUT.format(name="L1.md", path_rule=path_rule,
                                            tail="4. Under a heading `## Other entry points`, list the runnable entry points or paths your diagram does not cover.\n")])
     code, events, err = run(l1_dir, l1_prompt, args.model)
@@ -324,6 +330,7 @@ def main():
     open(os.path.join(l2_dir, "L1.md"), "w").write(l1_text)
     l2_prompt = "\n\n".join([
         L2_PROMPT,
+        PURPOSE,
         PROGRAM.format(extra=", plus `./L1.md`"),
         f"**One level up:** the high-level diagram for this program is `./L1.md`. Go one level deeper than that, on the same path:\n\n{path_line}",
         "**What a box is:** a major function, or a branch between major functions. Individual statements are not boxes; if a box would be one line of code, it belongs inside its caller. Draw branches as decision nodes with labelled edges.",

@@ -193,6 +193,14 @@ its own isolated agent.** Verbatim:
 | **L1** | *"Give me a high-level control flow diagram of what happens in this program."* | ~9 boxes |
 | **L2** | *"Go one level deeper — show the major functions and the branches between them, but don't go into individual statements."* | ~30 boxes |
 
+Each is followed by the same paragraph saying what the diagram is for, in
+neutral words that name neither the project nor the tool (`PURPOSE` in
+`isolated_cfg.py`): *"someone will use this diagram to answer, for any output
+the program produces, 'where did this come from?' — which files were loaded,
+which inputs and settings shaped it, and which steps transformed it."* With it,
+independent agents draw diagrams that agree more (L1 Jaccard 0.92 against 0.81
+without it, over 8 runs each).
+
 The L2 agent is given the L1 diagram as context — *"one level deeper"* has to be
 deeper than something — and nothing else. It is a second dispatch, not a second
 turn you take yourself once you know what the nodes are for.

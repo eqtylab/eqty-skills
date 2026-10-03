@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.4 — 2026-10-02
+
+- **eqty-instrument** — the Mode 2 CFG agents are told what their diagram is
+  for: answering, for any output the program produces, "where did this come
+  from?", meaning which files were loaded, which inputs and settings shaped it,
+  and which steps transformed it. The paragraph names neither the project nor
+  the tool, and follows the fixed prompt at both levels. Independent agents now
+  draw diagrams that agree more: over 8 runs each on llama, L1 Jaccard 0.92
+  against 0.81 without it, and L2 0.87 against 0.82, with the same coverage.
+
 ## 0.2.3 — 2026-09-30
 
 - **eqty-manifest** — an expired credential now reads *not checked* with its
