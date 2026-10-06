@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.6 — 2026-10-06
+
+- **eqty-instrument** — under Codex, the CFG agents no longer see your own
+  skills: Codex also loads skills from `~/.agents/skills`, so they now run with
+  an empty `HOME` as well as a fresh `CODEX_HOME`, and the isolation check fails
+  if any user skill appears.
+- **eqty-instrument** — fewer false isolation failures under Codex. The
+  `config.toml` Codex writes to trust its own working directory is allowed, and
+  anything else in it still fails the run (as does any `config.toml` on Python
+  below 3.11, which can't read it). A glob such as `**/x.py` is no longer read
+  as an absolute path, and `./x` given as an argument (`sed -n '1,9p' ./x`) no
+  longer counts as running code; run as a command, it still does.
+
 ## 0.2.5 — 2026-10-06
 
 - **eqty-manifest** — the HTML report takes three more inputs written by the

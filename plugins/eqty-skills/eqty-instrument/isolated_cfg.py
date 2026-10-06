@@ -20,7 +20,8 @@ auto-discovery excluded, tools limited to Read/Write/Glob/Grep, no session saved
 
 `--agent codex` runs `codex exec` with a fresh, empty CODEX_HOME holding only a
 link to the user's `auth.json` — so no user config, skills, MCP servers, plugins,
-hooks, memories or `~/.codex/AGENTS.md` — plus `--ignore-rules`, web search off,
+hooks, memories or `~/.codex/AGENTS.md` — and an empty HOME, since Codex also loads
+the user's skills from `~/.agents/skills` — plus `--ignore-rules`, web search off,
 the extra tool families disabled, a minimal shell environment, no session saved,
 and the `workspace-write` sandbox, which *enforces* that writes stay in the
 agent's directory and that there is no network.
@@ -36,7 +37,8 @@ Exit 0 only if every check passes; otherwise the CFG must not be used.
 Known residue, recorded in isolation.json: under Claude, the account's `userEmail`
 line is injected at login and cannot be removed without an API key (`--bare`).
 Under Codex, its built-in `.system` skills are installed into the fresh home (none
-concerns this project), and its sandbox lets a shell command *read* anywhere, so
+concerns this project), it writes a `config.toml` marking its own working directory
+trusted (allowed; any other setting fails the run), and its sandbox lets a shell command *read* anywhere, so
 read containment is audited from the command text rather than enforced.
 
 Outputs: <out>/L1.md, <out>/L2.md, <out>/isolation.json. Assembling
@@ -51,6 +53,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
+try:
+    import tomllib
+except ImportError:  # Python < 3.11: a config.toml can't be inspected, so it fails the run
+    tomllib = None
 
 L1_PROMPT = "Give me a high-level control flow diagram of what happens in this program."
 L2_PROMPT = ("Go one level deeper — show the major functions and the branches between them, "
@@ -136,6 +142,7 @@ def run_agent_codex(workdir, prompt, model):
     real_home = os.environ.get("CODEX_HOME") or os.path.expanduser("~/.codex")
     real_auth = os.path.join(real_home, "auth.json")
     home = tempfile.mkdtemp(prefix="codex-home-")
+    user_home = tempfile.mkdtemp(prefix="codex-user-home-")
     auth = os.path.join(home, "auth.json")
     if os.path.exists(real_auth):
         os.symlink(real_auth, auth)
@@ -146,7 +153,7 @@ def run_agent_codex(workdir, prompt, model):
         cmd += ["--disable", feature]
     if model:
         cmd += ["--model", model]
-    env = dict(os.environ, CODEX_HOME=home)
+    env = dict(os.environ, CODEX_HOME=home, HOME=user_home)
     try:
         proc = subprocess.run(cmd, cwd=workdir, capture_output=True, text=True,
                               stdin=subprocess.DEVNULL, env=env)
@@ -156,13 +163,19 @@ def run_agent_codex(workdir, prompt, model):
         if os.path.exists(auth) and not os.path.islink(auth):
             os.replace(auth, real_auth)
         skills_dir = os.path.join(home, "skills")
+        user_skills_dir = os.path.join(user_home, ".agents", "skills")
         record = {"type": "isolation.codex_home", "home": home,
                   "skills": sorted(os.listdir(skills_dir)) if os.path.isdir(skills_dir) else [],
                   "system_skills": sorted(os.listdir(os.path.join(skills_dir, ".system")))
                   if os.path.isdir(os.path.join(skills_dir, ".system")) else [],
+                  "user_skills": sorted(os.listdir(user_skills_dir)) if os.path.isdir(user_skills_dir) else [],
                   "config_files": [f for f in ("config.toml", "AGENTS.md", "hooks.json")
                                    if os.path.exists(os.path.join(home, f))]}
+        config = os.path.join(home, "config.toml")
+        if os.path.exists(config):
+            record["config_toml"] = open(config).read()
         shutil.rmtree(home, ignore_errors=True)
+        shutil.rmtree(user_home, ignore_errors=True)
     return proc.returncode, parse_jsonl(proc.stdout) + [record], proc.stderr
 
 
@@ -177,7 +190,9 @@ def command_escapes(command, workdir):
     run time. The sandbox, not this, is what stops writes and network."""
     body = SHELL_WRAPPER.sub("", command, count=1)
     roots = {workdir, os.path.realpath(workdir)}
-    for token in re.findall(r"(?<![\w.$-])/[^\s'\"`;|&)]*", body):
+    # A slash after a glob or brace character (`**/x.py`, `src/*/y`, `{a,b}/z`) is
+    # inside a relative pattern, not the start of an absolute path.
+    for token in re.findall(r"(?<![\w.$*?\]}-])/[^\s'\"`;|&)]*", body):
         if token in HARMLESS_PATHS or token == "/":
             continue
         if not any(token == r or token.startswith(r + os.sep) for r in roots):
@@ -188,10 +203,26 @@ def command_escapes(command, workdir):
         return "parent directory"
     if re.search(r"\b(?:curl|wget|ssh|scp|nc|pip3?|npm|uv|git)\b", body):
         return "network or install command"
+    # `./x` runs only as a command, never as an argument after a quote (`sed -n '1,9p' ./x`)
     if re.search(r"(?:^|[;&|(]\s*|['\"]\s*)(?:python[\d.]*|pytest|ipython|jupyter|node|ruby|perl|make|poetry|pdm|hatch|tox"
-                 r"|conda|sh|bash|zsh|\./\S+)(?=[\s'\"]|$)", body):
+                 r"|conda|sh|bash|zsh)(?=[\s'\"]|$)|(?:^['\"]?|[;&|(])\s*\./\S+", body):
         return "runs code (the skill never runs the target)"
     return None
+
+
+def codex_config_is_own_trust(text, workdir):
+    """Whether a fresh home's config.toml holds only what Codex writes there itself:
+    `trust_level = "trusted"` for the directory it was started in (seen in 0.148)."""
+    if text is None or tomllib is None:
+        return False
+    try:
+        config = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return False
+    roots = {workdir, os.path.realpath(workdir)}
+    projects = config.get("projects", {})
+    return set(config) <= {"projects"} and all(
+        path in roots and entry == {"trust_level": "trusted"} for path, entry in projects.items())
 
 
 def read_output(workdir, out_name):
@@ -215,8 +246,11 @@ def check_run_codex(level, workdir, prompt, events, out_name):
     checks = {
         "prompt_has_no_project_words": not LEAK_WORDS.search(prompt),
         "workdir_outside_git": not inside_git(workdir),
-        "fresh_codex_home": bool(home) and not home["config_files"]
-                            and set(home["skills"]) <= {".system"},
+        "fresh_codex_home": bool(home) and set(home["skills"]) <= {".system"}
+                            and "user_skills" in home and not home["user_skills"]
+                            and not set(home["config_files"]) - {"config.toml"}
+                            and ("config.toml" not in home["config_files"]
+                                 or codex_config_is_own_trust(home.get("config_toml"), workdir)),
         "only_expected_event_items": not unexpected,
         "every_tool_call_inside_workdir": not outside,
         "agent_succeeded": any(e.get("type") == "turn.completed" for e in events) and not failed,

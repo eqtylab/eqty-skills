@@ -74,7 +74,7 @@ fresh process — `claude -p` by default, `codex exec` with `--agent codex` (the
 default when only `codex` is on PATH):
 - **Where it runs:** a neutral temp directory outside any git repo, holding only a copy of the target.
 - **What it gets under Claude:** no skills, no MCP servers, no settings or plugin hooks, no CLAUDE.md, and only the Read/Write/Glob/Grep tools.
-- **What it gets under Codex:** a fresh, empty `CODEX_HOME` holding only a link to the user's login, so no user config, skills, MCP servers, plugins, hooks, memories or `AGENTS.md`; web search and the extra tool families off; the `workspace-write` sandbox, which enforces no writes outside the copy and no network.
+- **What it gets under Codex:** a fresh, empty `CODEX_HOME` holding only a link to the user's login, so no user config, skills, MCP servers, plugins, hooks, memories or `AGENTS.md`, and an empty `HOME`, so none of the user's skills in `~/.agents/skills`; web search and the extra tool families off; the `workspace-write` sandbox, which enforces no writes outside the copy and no network.
 - **What it checks afterwards:** under Claude, every run's init record and every tool call; under Codex, the home it ran with, every event type, every file write and every shell command. It writes `isolation.json` and exits non-zero if anything leaked.
 
 **If it exits non-zero, or neither the `claude` nor the `codex` CLI is available, stop and report.** Do
