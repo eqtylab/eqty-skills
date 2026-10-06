@@ -11,6 +11,9 @@ one file, with no external assets, no JavaScript and no network access, that
 a person who was not present for the run can open and understand.
 
     uv run eqty-manifest/report.py <manifest.json> <out.html>
+        [--title TEXT]           # headline (defaults to the run kind)
+        [--session TEXT]         # 1-2 sentences starting "The session"/"This session"
+        [--step-notes steps.json]# {"<statement id or step #>": "one line"}
         [--narrative notes.md]   # agent-authored prose for "What this run was"
         [--no-verify]            # skip cryptographic verification (see below)
 
@@ -363,10 +366,104 @@ def headline(timeline, summary):
     }
 
 
+# Plain-language reading of each summary.py problem kind, shown above its raw
+# lines. These say what the result means and what evidence would settle it --
+# never why it happened: the manifest records absence, not its cause.
+PROBLEM_HELP = {
+    "Statement modified": ("The statement's bytes no longer hash to its own @id, so it changed after it was registered.",
+                           "The original statement bytes; this one cannot be trusted as written."),
+    "Credential missing": ("No credential in this manifest signs this statement. It is unsigned, not forged.",
+                           "A CredentialRegistration whose subject is this statement."),
+    "Statement not checked": ("The statement's hash against its @id could not be computed here.",
+                              "Rerun with the verifier's dependencies installed."),
+    "Malformed credential": ("The credential is not well-formed enough to verify.", "A well-formed credential for the same statement."),
+    "Signature failed": ("The signature does not verify against the key it names. The signed content is not what was signed.",
+                         "A credential whose signature verifies; treat the subject as unverified until then."),
+    "Signature not checked": ("The signature could not be checked (unsupported proof type, or dates outside validity). Unknown, not failed.",
+                              "A proof type this verifier supports, or a check inside the credential's validity window."),
+    "Registration does not re-hash": (
+        "The credential verifies, but its own registration no longer hashes to its @id.",
+        "Nothing in the manifest alone can tell tampering from older-emitter drift; see the note below."),
+    "Registration not checked": ("The registration's hash against its @id could not be computed.", "Rerun with dependencies installed."),
+    "Dangling credential": ("A credential vouches for a subject this manifest does not contain.",
+                           "The statement the credential names, included in the manifest."),
+    "Issuer mismatch": ("The credential's issuer is not the identity that registered it.",
+                        "A credential issued by the registration's own signer."),
+    "Hardware evidence missing": ("An identity points to hardware evidence the manifest does not carry, so there was nothing to check.",
+                                  "The evidence blobs themselves, included in the manifest."),
+    "Hardware signature failed": ("The hardware report's signature does not verify. Do not treat that hardware as attested.",
+                                  "A hardware report whose signature verifies."),
+    "Hardware signature not checked": ("The hardware report's signature could not be checked. Unknown, not failed.",
+                                       "The report and its evidence blobs in a form this verifier supports."),
+    "Vendor chain failed": ("The report's certificate chain does not reach the pinned vendor root.",
+                            "A chain that verifies to the vendor's root."),
+    "Vendor chain not checked": ("The certificate chain could not be followed to a vendor root (for example, too short).",
+                                 "The full certificate chain, included with the evidence."),
+    "Hardware binding failed": ("A key claimed to be bound to verified hardware is not.", "Evidence that binds the key to a verified report."),
+    "Hardware binding not checked": ("The binding to a verified hardware report could not be checked.",
+                                     "A verified hardware report for the same identity."),
+    "Key binding failed": ("The hardware evidence does not carry the DID's key it claims to vouch for.",
+                           "Evidence whose report data carries this DID's public key."),
+    "Missing system": ("Steps say they ran on a system this manifest gives no identity to, so where they ran cannot be checked.",
+                       "An identity attestation or DID registration for that system, included in the manifest."),
+}
+
+
+SAFE_POD_FIELDS = ("name", "namespace")
+
+
+def identity_info(data):
+    """What the manifest says about each identity: attested types, any pod /
+    container names (workload labels, not personal data), and the hosts its
+    attestation says it runs on. Personal entity metadata is never read here."""
+    S = data.get("statements") or {}
+    out = {}
+
+    def did_of(v):
+        if isinstance(v, dict):
+            v = v.get("id")
+        return v.split("#")[0] if isinstance(v, str) else None
+
+    for sid, s in S.items():
+        if s.get("@type") == "DidRegistration" and s.get("did"):
+            d = out.setdefault(did_of(s["did"]), {"types": []})
+            d["registered"] = True
+            t = (s.get("vcomp") or {}).get("@type") if isinstance(s.get("vcomp"), dict) else None
+            if t and t not in d["types"]:
+                d["types"].append(t)
+        cred = s.get("credential") if isinstance(s.get("credential"), dict) else None
+        if not cred or "IdentityAttestation" not in (cred.get("type") or []):
+            continue
+        subj = cred.get("credentialSubject") or {}
+        did = did_of(subj.get("id"))
+        if not did:
+            continue
+        d = out.setdefault(did, {"types": []})
+        ident = subj.get("identity") if isinstance(subj.get("identity"), dict) else {}
+        if ident.get("type") and ident["type"] not in d["types"]:
+            d["types"].append(ident["type"])
+        if isinstance(ident.get("pod"), dict):
+            d["pod"] = {k: str(ident["pod"][k]) for k in SAFE_POD_FIELDS if ident["pod"].get(k)}
+        names = [c.get("name") for c in P.as_list(ident.get("containers")) if isinstance(c, dict) and c.get("name")]
+        if names:
+            d["containers"] = sorted(set(d.get("containers", []) + names))
+        hosts = [did_of(x) for x in P.as_list(ident.get("executedOn"))]
+        d["executedOn"] = sorted(set(d.get("executedOn", []) + [h for h in hosts if h]))
+        ev = cred.get("evidence")
+        types = [str(t) for e in P.as_list(ev) if isinstance(e, dict)
+                 for t in P.as_list(e.get("type")) if t]
+        if types:
+            d["evidence_types"] = sorted(set(d.get("evidence_types", []) + types))
+    return out
+
+
 # ------------------------------------------------------------- the model
 
-def build_model(path, narrative=None, verify=True):
+def build_model(path, narrative=None, verify=True, title=None, session=None, step_notes=None):
     data = P.load(path)
+    import hashlib
+    with open(path, "rb") as fh:
+        sha256 = hashlib.sha256(fh.read()).hexdigest()
     m = P.Manifest(data)
     summary = m.summary()
     timeline = m.timeline()
@@ -378,7 +475,14 @@ def build_model(path, narrative=None, verify=True):
                           .strftime("%Y-%m-%d %H:%M:%SZ"),
             "manifest_version": data.get("version"),
             "verified": verify,
+            "sha256": sha256,
         },
+        "title": title,
+        "session": session,
+        "step_notes": step_notes or {},
+        # blobs whose CID this skill can hash (BLAKE3); others read "not checked"
+        "blob_keys": sorted(k for k in (data.get("blobs") or {}) if P.cid_digest(k) is not None),
+        "identities": identity_info(data),
         "headline": headline(timeline, summary),
         "metrics": {
             "statements": summary["total_statements"],
@@ -407,6 +511,7 @@ def build_model(path, narrative=None, verify=True):
             "name": _step_name(e),
             "type": _meta(e).get("computation_type"),
             "operatedBy": e.get("operatedBy"),
+            "executedOn": e.get("executedOn"),
             "site": _meta(e).get("site"),
             "environment": e.get("environment"),
             "inputs": [{"cid": x["cid"], "label": _label_for(m, x["cid"], x.get("preview")),
@@ -424,79 +529,166 @@ E = html.escape
 
 CSS = """
 :root{
-  --bg:#fbfbf9; --fg:#1c1b19; --muted:#6b6862; --rule:#e2e0da; --panel:#ffffff;
-  --ok:#1f7a4d; --ok-bg:#e8f5ee; --warn:#8a5a00; --warn-bg:#fdf3e0;
-  --bad:#a41f1f; --bad-bg:#fdecec; --unk:#5a5f6b; --unk-bg:#eef0f3;
-  --accent:#2c4a7c;
+  --bg:#f5f6f4; --fg:#1c1f1d; --muted:#6b716c; --rule:#e3e6e1; --panel:#ffffff; --soft:#f3f4f2;
+  --ok:#1f7a4d; --ok-bg:#e3f3ea; --warn:#8a5a00; --warn-bg:#fbefd6;
+  --bad:#a41f1f; --bad-bg:#fbe3e1; --unk:#5a5f6b; --unk-bg:#eceef1;
+  --accent:#2f6f5e; --accent-soft:#e6f0ec; --in:#b7791f; --out:#2f6f5e;
+  --hw:#7a4fb5; --hw-bg:#f1ebf9; --hero1:#1d2b26; --hero2:#2f4a40;
+  --c1:#2f6f5e; --c2:#d08c2c; --c3:#5b7fb8; --c4:#8a6fc2; --c5:#c4584f; --c6:#4f9fa8; --c7:#9aa29b;
 }
 @media (prefers-color-scheme:dark){
   :root{
-    --bg:#16171a; --fg:#e7e5e1; --muted:#9b978f; --rule:#2e3034; --panel:#1d1f23;
-    --ok:#63c795; --ok-bg:#16301f; --warn:#e0b060; --warn-bg:#332616;
-    --bad:#f08a8a; --bad-bg:#341a1a; --unk:#a8adb8; --unk-bg:#23262b;
-    --accent:#8fb3e8;
+    --bg:#121513; --fg:#e7ebe8; --muted:#9aa29b; --rule:#2b312d; --panel:#1b1f1c; --soft:#161a17;
+    --ok:#7fd4a8; --ok-bg:#183326; --warn:#f0c071; --warn-bg:#3a2c12;
+    --bad:#f2a19b; --bad-bg:#3d1b18; --unk:#a8adb8; --unk-bg:#23262b;
+    --accent:#6cc2a6; --accent-soft:#1f2e28; --hw:#b796e6; --hw-bg:#261f33;
   }
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);
-  font:15px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;}
-.wrap{max-width:920px;margin:0 auto;padding:40px 24px 96px}
-h1{font-size:26px;margin:0 0 4px;letter-spacing:-.01em}
-h2{font-size:19px;margin:44px 0 12px;padding-bottom:6px;border-bottom:1px solid var(--rule)}
-h3{font-size:15px;margin:26px 0 8px}
+  font:15px/1.55 ui-sans-serif,-apple-system,"Segoe UI",Helvetica,Arial,sans-serif;}
+.wrap{max-width:920px;margin:0 auto;padding:24px 16px 64px}
+h2{font-size:20px;margin:0 0 6px}
+h3{font-size:15px;margin:22px 0 8px}
 p{margin:0 0 12px}
 code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.88em}
-pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82em;
-  line-height:1.45;background:var(--panel);border:1px solid var(--rule);border-radius:6px;
-  padding:.7rem .9rem;overflow-x:auto;white-space:pre}
-.sub{color:var(--muted);margin:0 0 2px}
-.gen{color:var(--muted);font-size:12.5px;margin:14px 0 0}
-.strip{display:flex;flex-wrap:wrap;gap:0;margin:22px 0 0;border:1px solid var(--rule);
-  border-radius:8px;background:var(--panel);overflow:hidden}
-.strip div{flex:1 1 110px;padding:12px 14px;border-right:1px solid var(--rule)}
+pre{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82em;line-height:1.45;
+  background:var(--soft);border:1px solid var(--rule);border-radius:6px;padding:.7rem .9rem;overflow-x:auto;white-space:pre}
+.card{background:var(--panel);border:1px solid var(--rule);border-radius:14px;padding:26px;margin-top:18px}
+.sub{color:var(--muted);margin:0 0 16px}
+/* ---- header ---- */
+.hero{background:linear-gradient(135deg,var(--hero1),var(--hero2));color:#fff;border-radius:16px;padding:30px 28px}
+.eyebrow{letter-spacing:.14em;font-size:12px;opacity:.7;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.hero h1{font-size:28px;line-height:1.2;margin:10px 0 12px;letter-spacing:-.01em}
+.hero p{opacity:.88;margin:0 0 6px}
+.hero code{background:rgba(255,255,255,.12);padding:0 4px;border-radius:4px}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));margin-top:20px;
+  border:1px solid rgba(255,255,255,.18);border-radius:10px;overflow:hidden}
+.strip div{padding:12px 14px;border-right:1px solid rgba(255,255,255,.18)}
 .strip div:last-child{border-right:0}
-.strip b{display:block;font-size:20px;font-weight:600;letter-spacing:-.02em}
-.strip span{display:block;color:var(--muted);font-size:11.5px;text-transform:uppercase;
-  letter-spacing:.06em;margin-top:2px}
-.pills{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0 0}
-.pill{display:inline-flex;align-items:center;gap:6px;padding:5px 11px;border-radius:999px;
-  font-size:12.5px;font-weight:500}
+.strip b{display:block;font-size:21px;font-weight:650;letter-spacing:-.01em}
+.strip span{display:block;font-size:11px;letter-spacing:.08em;text-transform:uppercase;opacity:.75;margin-top:2px}
+.strip .flag b{color:#f6c87a}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}
+.gen{color:var(--muted);font-size:12.5px;margin:10px 0 0}
+/* ---- pills ---- */
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 11px;border-radius:999px;font-size:12.5px;font-weight:500}
+.pill.sm{font-size:11px;padding:1px 8px;font-weight:600}
 .ok{background:var(--ok-bg);color:var(--ok)} .warn{background:var(--warn-bg);color:var(--warn)}
 .bad{background:var(--bad-bg);color:var(--bad)} .unk{background:var(--unk-bg);color:var(--unk)}
+/* ---- tables / verification ---- */
 table{width:100%;border-collapse:collapse;margin:8px 0 16px;font-size:14px}
 th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
 th{font-size:11.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:600}
 td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
 .scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
-.phase{border:1px solid var(--rule);border-radius:8px;background:var(--panel);
-  padding:14px 16px;margin:0 0 12px}
-.phase h3{margin:0 0 6px;display:flex;justify-content:space-between;gap:12px;align-items:baseline}
-.phase h3 em{font-style:normal;color:var(--muted);font-size:12.5px;font-weight:400}
-.chain{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;
-  color:var(--accent);margin:0 0 8px;word-break:break-word}
-.made{margin:0;color:var(--muted);font-size:13px}
-.made b{color:var(--fg);font-weight:500}
-.note{border-left:3px solid var(--rule);padding:2px 0 2px 14px;margin:0 0 14px;
-  color:var(--muted);font-size:13.5px}
-.empty{border:1px dashed var(--rule);border-radius:8px;padding:16px;color:var(--muted);
-  font-size:13.5px;background:var(--panel)}
+.note{border-left:3px solid var(--rule);padding:2px 0 2px 14px;margin:0 0 14px;color:var(--muted);font-size:13.5px}
+.empty{border:1px dashed var(--rule);border-radius:8px;padding:16px;color:var(--muted);font-size:13.5px;background:var(--soft)}
 .narr p:last-child{margin-bottom:0}
 ul{margin:0 0 12px;padding-left:22px}
-.did{word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
-  font-size:12px;color:var(--muted)}
-.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--unk-bg);
-  margin:6px 0 6px}
+.did{word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:var(--muted)}
+.bar{display:flex;height:14px;border-radius:7px;overflow:hidden;background:var(--unk-bg);margin:6px 0}
 .bar span{display:block;height:100%;min-width:3px}
 .bar .ok,.key.ok{background:var(--ok)} .bar .bad,.key.bad{background:var(--bad)}
 .bar .warn,.key.warn{background:var(--warn)} .bar .unk,.key.unk{background:var(--unk)}
 .legend{color:var(--muted);font-size:12.5px}
 .key{display:inline-block;width:9px;height:9px;border-radius:2px;margin:0 5px 0 0}
-.issue{margin:14px 0 4px}
-ul.ids{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;
-  margin:0 0 8px;overflow-wrap:anywhere}
+.issue{margin:18px 0 4px}
+.plain{display:grid;grid-template-columns:150px 1fr;gap:4px 12px;font-size:13.5px;margin:6px 0 8px}
+.plain b{color:var(--muted);font-weight:600;font-size:11.5px;letter-spacing:.05em;text-transform:uppercase;padding-top:2px}
+ul.ids{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;margin:0 0 8px;overflow-wrap:anywhere;color:var(--muted)}
 details{margin:0 0 10px} summary{cursor:pointer;color:var(--accent);font-size:13.5px}
-footer{margin-top:48px;padding-top:14px;border-top:1px solid var(--rule);
-  color:var(--muted);font-size:12.5px}
+/* ---- timeline ---- */
+.tl{position:relative;height:150px;margin:8px 12px 0}
+.tl .rail{position:absolute;left:0;right:0;top:74px;height:2px;background:var(--rule)}
+.tl .dot{position:absolute;top:65px;width:20px;height:20px;margin-left:-10px;border-radius:50%;background:var(--panel);
+  border:2px solid var(--ok);color:var(--ok);font-size:10px;font-weight:700;text-align:center;line-height:16px}
+.tl .dot.sm{top:69px;width:12px;height:12px;margin-left:-6px;font-size:0}
+.tl .dot.bad{border-color:var(--bad);color:var(--bad);background:var(--bad-bg)}
+.tl .dot.warn{border-color:var(--warn);color:var(--warn);background:var(--warn-bg)}
+.tl .dot.unk{border-color:var(--unk);color:var(--unk);background:var(--unk-bg)}
+.tl .lbl{position:absolute;transform:translateX(-50%);text-align:center;font-size:12px;white-space:nowrap}
+.tl .lbl.up{top:8px} .tl .lbl.down{top:94px}
+.tl .lbl.l0{transform:none} .tl .lbl.lN{transform:translateX(-100%)}
+.tl .lbl small{display:block;color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.axis{position:relative;height:20px;margin:0 12px;border-top:1px solid var(--rule);color:var(--muted);font-size:11px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.axis span{position:absolute;top:4px;transform:translateX(-50%)}
+.axis span:first-child{transform:none} .axis span:last-child{transform:translateX(-100%)}
+.tkey{display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:12px}
+.tkey i{display:inline-block;width:10px;height:10px;border-radius:50%;border:2px solid;margin-right:5px;vertical-align:-1px}
+.callout{background:var(--accent-soft);border-radius:10px;padding:12px 14px;margin-top:14px;font-size:14px}
+.phase{border:1px solid var(--rule);border-radius:8px;background:var(--soft);padding:12px 14px;margin:8px 0}
+.phase h3{margin:0 0 4px;font-size:14px;display:flex;justify-content:space-between;gap:12px}
+.phase h3 em{font-style:normal;color:var(--muted);font-size:12px;font-weight:400}
+.chain{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px;color:var(--accent);margin:0;word-break:break-word}
+/* ---- step cards ---- */
+.steps{position:relative}
+.steps::before{content:"";position:absolute;left:19px;top:10px;bottom:10px;width:2px;background:var(--rule)}
+.step{display:flex;gap:16px;margin-bottom:14px;position:relative;break-inside:avoid}
+.snum{flex:0 0 40px;height:40px;border-radius:50%;border:2px solid var(--ok);background:var(--panel);color:var(--ok);
+  font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;z-index:1}
+.snum.n-bad{border-color:var(--bad);color:var(--bad);background:var(--panel)}
+.snum.n-warn{border-color:var(--warn);color:var(--warn);background:var(--panel)}
+.snum.n-unk{border-color:var(--unk);color:var(--unk);background:var(--panel)}
+.sbody{flex:1;min-width:0;border:1px solid var(--rule);border-radius:12px;padding:14px 16px;background:var(--soft)}
+.sbody.s-bad{border-left:4px solid var(--bad)} .sbody.s-warn{border-left:4px solid var(--warn)}
+.shead{display:flex;flex-wrap:wrap;gap:8px;align-items:baseline}
+.shead b{font-size:16px;word-break:break-word}
+.shead .t{color:var(--muted);font-size:12px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.tag{margin-left:auto;border:1px solid var(--rule);border-radius:99px;padding:1px 10px;font-size:11px;color:var(--muted);
+  background:var(--panel);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.sbody p.what{margin:6px 0 8px;color:var(--muted)}
+.env{font-size:12px;margin:8px 0 12px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.env .did{font-size:11px}
+.io{display:grid;grid-template-columns:1fr auto 1fr;gap:10px}
+.io h4{margin:0 0 6px;font-size:11px;letter-spacing:.1em;color:var(--muted)}
+.chip{background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:9px 12px;font-weight:600;font-size:14px;
+  margin-bottom:6px;word-break:break-word}
+.chip .cid{display:flex;gap:8px;flex-wrap:wrap;font-weight:400;font-size:10.5px;color:var(--muted);margin-top:2px;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.chip .h-ok{color:var(--ok)} .chip .h-bad{color:var(--bad);font-weight:700} .chip .h-warn{color:var(--warn)} .chip .h-unk{color:var(--unk)}
+.in .chip{border-left:4px solid var(--in)} .out .chip{border-left:4px solid var(--out)}
+.arrow{align-self:center;color:var(--muted);font-size:20px;padding-top:16px}
+.more{font-size:12px;color:var(--muted)}
+/* ---- composition donut ---- */
+.comp{display:flex;gap:28px;align-items:center;flex-wrap:wrap}
+.clegend{flex:1;min-width:240px}
+.clegend div{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--rule);font-size:14px}
+.clegend i{width:12px;height:12px;border-radius:3px;flex:0 0 12px}
+.clegend small{color:var(--muted);font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px}
+.clegend span{margin-left:auto;color:var(--muted);font-variant-numeric:tabular-nums}
+/* ---- identities ---- */
+.grp{font-size:13px;font-weight:700;margin:20px 0 8px}
+.stylekey{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-bottom:6px}
+.stylekey span{border-radius:6px;padding:2px 8px}
+.id{border:1px solid var(--rule);border-radius:12px;padding:14px 16px;margin-bottom:10px;background:var(--soft);break-inside:avoid}
+.id.hw-ok{border:2px solid var(--hw);background:var(--hw-bg)}
+.id.hw-claim{border:2px dashed var(--warn);background:var(--warn-bg)}
+.id.missing{border:2px solid var(--bad);background:var(--bad-bg)}
+.id .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.id .cnt{margin-left:auto;font-size:12px;color:var(--muted)}
+.id .did{margin:3px 0 8px}
+.id p{margin:6px 0 0;font-size:13px}
+.ev{display:inline-block;font-size:11px;border:1px solid currentColor;border-radius:6px;padding:1px 7px;margin:2px 4px 0 0;
+  font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.ev.ok,.ev.warn,.ev.bad,.ev.unk{background:none}
+/* ---- provenance ---- */
+.prov{display:grid;grid-template-columns:170px 1fr;gap:6px 14px;font-size:13px}
+.prov b{color:var(--muted);font-weight:600}
+.prov span{word-break:break-all;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+footer{margin-top:24px;color:var(--muted);font-size:12.5px;text-align:center}
+@media (max-width:640px){
+  .io{grid-template-columns:1fr} .arrow{transform:rotate(90deg);justify-self:center;padding:0}
+  .hero h1{font-size:23px} .strip div{border-right:0;border-bottom:1px solid rgba(255,255,255,.18)}
+  .plain,.prov{grid-template-columns:1fr} .card{padding:18px}
+}
+@media print{
+  body{background:#fff} .wrap{max-width:none;padding:0}
+  .card,.hero,.step,.id{break-inside:avoid-page} .card.long{break-inside:auto}
+  .hero{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  details>*{display:block} details>summary{display:none}
+}
 """
 
 
@@ -666,11 +858,14 @@ def _hash_bar(c):
             % (E(", ".join("%d %s" % (n, name) for _, name, n in parts)), bar, legend))
 
 
-def _verification_html(v):
+def _verification_html(v, pills=None):
     import summary as SM
     h = []
     a = h.append
     a("<h2>Verification summary</h2>")
+    if pills:
+        a('<div class="pills" style="margin:4px 0 16px">%s</div>' % "".join(
+            _pill(cls, "%s: %s" % (name, text)) for name, cls, text in pills))
     a('<p class="note">The same block <code>summary.py</code> prints, computed once from this '
       'manifest. Checks fail independently and are never merged into one verdict; a check '
       'that could not run says <em>not checked</em>, never passes.</p>')
@@ -695,6 +890,10 @@ def _verification_html(v):
         for kind, (sev, lines) in groups.items():
             cls, word = SEV[sev]
             a('<p class="issue">%s <strong>%s</strong> · %d</p>' % (_pill(cls, word), E(kind), len(lines)))
+            if kind in PROBLEM_HELP:
+                means, settles = PROBLEM_HELP[kind]
+                a('<div class="plain"><b>What it means</b><span>%s</span><b>What would settle it</b><span>%s</span></div>'
+                  % (E(means), E(settles)))
             if kind == SM.DRIFT:
                 n = len(lines)
                 a('<details><summary>%d registration%s not hash to %s @id; %s</summary>'
@@ -902,25 +1101,610 @@ def _legacy_trust(a, tr, rows):
         if detail:
             a("<p>%s</p>" % "<br>".join(E(d) for d in detail))
 
-def render_html(mo):
+# ------------------------------------------------------- page sections
+# Layout: header (title, authored session sentence, computed manifest
+# sentence, stat strip, separate pills) -> what this run was -> verification
+# summary -> horizontal timeline -> step cards (inputs/outputs emphasised) ->
+# statement composition donut -> signing identities (hardware first; the
+# emphasis follows the verification result) -> glossary (only terms the page
+# uses) -> provenance.
+#
+# Every state colour on the page is read from the summary dict / content check
+# computed above. Nothing here decides a trust result of its own: it only
+# joins those results onto steps, CIDs and DIDs.
+
+FRIENDLY_TYPES = {
+    "CredentialRegistration": "Credential seals",
+    "MetadataRegistration": "Metadata registrations",
+    "DataRegistration": "Data registrations",
+    "ComputationRegistration": "Computation registrations",
+    "DidRegistration": "DID registrations",
+}
+DONUT_COLORS = ["var(--c1)", "var(--c2)", "var(--c3)", "var(--c4)", "var(--c5)", "var(--c6)", "var(--c7)"]
+STEP_CARD_LIMIT = 40          # cards beyond this sit behind a <details>
+CHIP_LIMIT = 6                # inputs / outputs shown per side before "+N more"
+
+
+def _did(v):
+    if isinstance(v, dict):
+        v = v.get("id")
+    return v.split("#")[0] if isinstance(v, str) else None
+
+
+def _date(ts):
+    dt = _parse_ts(ts)
+    return dt.strftime("%b ") + str(dt.day) + dt.strftime(", %Y") if dt else None
+
+
+def _executed_date(start, end):
+    a, b = _parse_ts(start), _parse_ts(end)
+    if not a:
+        return "—"
+    if b and b.date() != a.date():
+        if (a.year, a.month) == (b.year, b.month):
+            return "%s %d–%d, %d" % (a.strftime("%b"), a.day, b.day, a.year)
+        return "%s – %s" % (_date(start), _date(end))
+    return _date(start)
+
+
+def _elapsed(secs):
+    if secs < 120:
+        return "%ds" % round(secs)
+    if secs < 7200:
+        return "%gm" % round(secs / 60, 1)
+    return "%gh" % round(secs / 3600, 1)
+
+
+def _join_state(mo):
+    """Join the computed trust results onto CIDs, DIDs and steps."""
+    tr = mo["trust"]
+    v = tr.get("verification")
+    c = tr["content"] or {}
+    checked = c.get("status") == "verified"
+    tampered = set(c.get("mismatched") or [])
+    bad64 = set(c.get("invalid_base64") or [])
+    missing = set(c.get("missing") or [])
+    byref = set((c.get("by_reference") or {}).keys())
+
+    def cid_state(cid):
+        k = P.strip_urn(cid)
+        if k in tampered:
+            return "bad", "✗ tampered"
+        if k in bad64:
+            return "bad", "✗ invalid base64"
+        if k in missing:
+            return "warn", "missing pre-image"
+        if k in byref:
+            return "unk", "by reference"
+        if not checked:
+            return "unk", "not checked"
+        if k not in mo["blob_keys"]:
+            return "unk", "not checked"
+        return "ok", "✓ hash verified"
+
+    links = (v or {}).get("executed_on") or []
+    present = {}
+    for l in links:
+        present[l["did"]] = present.get(l["did"], True) and l["present"]
+
+    hw = {}
+    for i in ((v or {}).get("hardware") or {}).get("items") or []:
+        d = _did(i.get("did"))
+        if not (d and d.startswith("did:")):
+            d = next((t for t in str(i.get("label", "")).split() if t.startswith("did:")), None)
+        if d:
+            hw.setdefault(d, []).append(i)
+
+    def hw_state(did):
+        items = hw.get(did) or []
+        if not items:
+            return "none", "no hardware evidence in this manifest"
+        if any(i["signature"] is False or i["chain"] is False or i.get("key_binding") is False
+               or (i.get("has_binding") and i.get("binding") is False) for i in items):
+            return "bad", "hardware check FAILED"
+        if all(i["signature"] is True and (i["chain"] is True or i.get("chain_via_binding")) for i in items):
+            return "ok", "hardware evidence verified"
+        if all(i.get("nothing_checked") for i in items):
+            return "warn", "hardware evidence not in manifest — nothing to check"
+        return "warn", "hardware claimed, not verified"
+
+    sig = (tr.get("signatures") or {})
+    by_subject = sig.get("by_subject") or {}
+    sig_ran = sig.get("status") == "run"
+
+    states = {}
+    for st in mo["steps"]:
+        did = _did(st.get("executedOn"))
+        link = present.get(did) if (v and did) else None
+        io = [cid_state(x["cid"])[0] for x in st["inputs"] + st["outputs"]]
+        s = by_subject.get(st["statement_id"]) if sig_ran else None
+        reasons = []
+        if s is False:
+            reasons.append("signature failed")
+        if link is False:
+            reasons.append("executedOn names a system not in this manifest")
+        if "bad" in io:
+            reasons.append("an input or output fails its hash")
+        if reasons:
+            cls = "bad"
+        elif not v:
+            cls = "unk"
+            reasons.append("verification not run")
+        elif (sig_ran and s is None) or "warn" in io:
+            cls = "warn"
+            if sig_ran and s is None:
+                reasons.append("no credential names this step directly")
+            if "warn" in io:
+                reasons.append("an input or output has no pre-image")
+        else:
+            cls = "ok"
+        states[st["n"]] = {"cls": cls, "reasons": reasons, "did": did, "link": link}
+    return {"cid_state": cid_state, "present": present, "hw": hw, "hw_state": hw_state,
+            "states": states, "links": links, "verified": bool(v)}
+
+
+def _hero_html(mo, J):
     src, hl, me, tr = mo["source"], mo["headline"], mo["metrics"], mo["trust"]
     h = []
     a = h.append
+    title = mo.get("title") or hl["kind"]
+    a('<header class="hero">')
+    a('<div class="eyebrow">VERIFIABLE EXECUTION REPORT</div>')
+    a("<h1>%s</h1>" % E(title))
+    if mo.get("session"):
+        a("<p>%s</p>" % E(mo["session"]))
+    # The second sentence is about the manifest itself, and is computed.
+    stimes = sorted(s["timestamp"] for s in mo["steps"] if s.get("timestamp"))
+    rng = [stimes[0], stimes[-1]] if stimes else [hl["start"], hl["end"]]
+    wall = _span(rng[0], rng[1]) if rng[0] else None
+    same_day = bool(_parse_ts(rng[0]) and _parse_ts(rng[1]) and _parse_ts(rng[0]).date() == _parse_ts(rng[1]).date())
+    fmt = (lambda t: _clock(t)) if same_day else (lambda t: "%s %s" % (_date(t), _clock(t)))
+    span = (" between %s and %s" % (E(fmt(rng[0])), E(fmt(rng[1])))) if rng[0] and rng[1] and rng[0] != rng[1] else ""
+    a("<p>This report reads <code>%s</code>, a signed lineage manifest of %d statements and %d "
+      "content-addressed blobs from %d signing identit%s. It records %d computation step%s%s%s, "
+      "and every figure below is computed from that file.</p>" % (
+          E(src["file"]), me["statements"], me["blobs"], me["signers"],
+          "y" if me["signers"] == 1 else "ies", me["steps"], "" if me["steps"] == 1 else "s", span,
+          (" (%s)" % E(wall)) if wall and span else ""))
+    a('<div class="strip">')
+    a("<div><b>%s</b><span>executed on</span></div>" % E(_executed_date(rng[0], rng[1])))
+    for label, val in [("statements", me["statements"]), ("blobs", me["blobs"]),
+                       ("signers", me["signers"]), ("steps", me["steps"])]:
+        a("<div><b>%s</b><span>%s</span></div>" % (val, E(label)))
+    a('<div class="%s"><b>%s</b><span>orphaned blobs</span></div>' % (
+        "flag" if me["orphaned_blobs"] else "", me["orphaned_blobs"]))
+    a("</div></header>")
+    return "\n".join(h)
 
-    subtitle = " · ".join(x for x in [hl["kind"], hl["framework"],
-                                      hl["wall_clock"] and hl["wall_clock"] + " wall clock"] if x)
-    a("<title>%s — EQTY lineage report</title>" % E(src["file"]))
+
+def _timeline_html(mo, J):
+    steps = mo["steps"]
+    n = len(steps)
+    h = ['<section class="card"><h2>Timeline</h2>']
+    a = h.append
+    if not n:
+        a('<p class="empty">This manifest records no ComputationRegistration, so there is no timeline.</p></section>')
+        return "\n".join(h)
+    times = [_parse_ts(s["timestamp"]) for s in steps]
+    t0 = next((t for t in times if t), None)
+    secs = [((t - t0).total_seconds() if (t and t0) else None) for t in times]
+    known = [s for s in secs if s is not None]
+    span = max(known) if known else 0
+    raw = []
+    for i, s in enumerate(secs):
+        if span and s is not None:
+            raw.append(100.0 * s / span)
+        else:
+            raw.append(100.0 * i / (n - 1) if n > 1 else 50.0)
+    # Steps that share a second would sit on top of each other: keep a
+    # minimum gap, then rescale. Order is preserved; spacing stays roughly
+    # proportional to elapsed time.
+    gap = min(3.2, 100.0 / max(n - 1, 1))
+    pos = raw[:]
+    for i in range(1, n):
+        pos[i] = max(pos[i], pos[i - 1] + gap)
+    if n > 1 and pos[-1] > 100:
+        lo = pos[0]
+        pos = [lo + (p - lo) * (100 - lo) / (pos[-1] - lo) for p in pos]
+    st = J["states"]
+    counts = Counter(st[s["n"]]["cls"] for s in steps)
+    a('<p class="sub">%d step%s over %s. Dot colour is each step\'s verification state.</p>' % (
+        n, "" if n == 1 else "s", _span(steps[0]["timestamp"], steps[-1]["timestamp"]) or "an unknown span"))
+    a('<div class="tl"><div class="rail"></div>')
+    small = n > 40
+    for s, p in zip(steps, pos):
+        a('<div class="dot %s%s" style="left:%.2f%%" title="%d · %s · %s">%s</div>' % (
+            st[s["n"]]["cls"] if st[s["n"]]["cls"] != "ok" else "", " sm" if small else "", p, s["n"],
+            E(s["name"]), E(_clock(s["timestamp"])), "" if small else s["n"]))
+    # Labels: first, last, then the earliest non-green steps, kept apart.
+    picks = [0, n - 1] + [i for i, s in enumerate(steps) if st[s["n"]]["cls"] in ("bad", "warn")]
+    if n > 2:
+        picks += [round((n - 1) * k / 3) for k in (1, 2)]
+    chosen = []
+    for i in picks:
+        if i not in chosen and all(abs(pos[i] - pos[j]) >= 16 for j in chosen) and len(chosen) < 5:
+            chosen.append(i)
+    for k, i in enumerate(sorted(chosen, key=lambda i: pos[i])):
+        s = steps[i]
+        edge = " l0" if pos[i] < 8 else " lN" if pos[i] > 92 else ""
+        a('<div class="lbl %s%s" style="left:%.2f%%"><small>%s</small>%d · %s</div>' % (
+            "up" if k % 2 == 0 else "down", edge, pos[i], E(_clock(s["timestamp"])), s["n"], E(s["name"][:28])))
+    a("</div>")
+    if span:
+        a('<div class="axis">%s</div>' % "".join(
+            '<span style="left:%g%%">%s</span>' % (q * 25, _elapsed(span * q / 4)) for q in range(5)))
+    a('<div class="tkey"><span><i style="border-color:var(--ok)"></i>all checks verified</span>'
+      '<span><i style="border-color:var(--warn)"></i>verified with gaps</span>'
+      '<span><i style="border-color:var(--bad)"></i>a check failed</span>'
+      '<span><i style="border-color:var(--unk)"></i>not checked</span></div>')
+    if counts.get("bad") or counts.get("warn"):
+        why = Counter(r for s in steps for r in st[s["n"]]["reasons"] if st[s["n"]]["cls"] in ("bad", "warn"))
+        a('<div class="callout">%s</div>' % E("; ".join(
+            "%d step%s: %s" % (c, "" if c == 1 else "s", r) for r, c in why.most_common()) + "."))
+    ru = mo["rollup"]
+    if len(ru["phases"]) > 1:
+        a('<details style="margin-top:14px"><summary>%d phases, grouped by %s</summary>' % (
+            len(ru["phases"]), "the manifest's own <code>%s</code> field" % E(ru["grouping_key"])
+            if ru["grouping_key"] else "contiguous timestamps (derived, not stated)"))
+        for ph in ru["phases"]:
+            a('<div class="phase"><h3><span>%s</span><em>%s · %d step%s</em></h3><p class="chain">%s</p></div>' % (
+                E(ph["label"]), E(_clock(ph["start"])), ph["step_count"],
+                "" if ph["step_count"] == 1 else "s", E(ph["chain"])))
+        a("</details>")
+    a("</section>")
+    return "\n".join(h)
+
+
+def _chip(J, x):
+    cls, word = J["cid_state"](x["cid"])
+    return ('<div class="chip">%s<span class="cid"><span>%s</span><span class="h-%s">%s</span></span></div>'
+            % (E(x["label"]), E(_short(P.strip_urn(x["cid"]), 16)), cls, E(word)))
+
+
+def _chips(J, xs):
+    if not xs:
+        return '<div class="more">none recorded</div>'
+    out = "".join(_chip(J, x) for x in xs[:CHIP_LIMIT])
+    if len(xs) > CHIP_LIMIT:
+        out += '<div class="more">+%d more</div>' % (len(xs) - CHIP_LIMIT)
+    return out
+
+
+def _env_line(mo, J, st):
+    s = J["states"][st["n"]]
+    did = s["did"]
+    if not did:
+        return '<div class="env">%s</div>' % _pill("unk", "no executedOn claimed")
+    name = J["names"].get(did) or _short(did, 22)
+    if not J["verified"]:
+        return '<div class="env">%s<span class="did">→ %s</span></div>' % (
+            _pill("unk", "executedOn not checked (--no-verify)"), E(name))
+    if s["link"] is False:
+        return '<div class="env">%s<span class="did">→ %s (not in this manifest)</span></div>' % (
+            _pill("bad", "executedOn unresolved"), E(_short(did, 22)))
+    hcls, htxt = J["hw_state"](did)
+    return '<div class="env">%s%s<span class="did">→ %s</span></div>' % (
+        _pill("ok", "executedOn resolved"), _pill("unk" if hcls == "none" else hcls, htxt), E(name))
+
+
+def _steps_html(mo, J):
+    steps = mo["steps"]
+    h = ['<section class="card long"><h2>Compute steps</h2>']
+    a = h.append
+    if not steps:
+        a('<p class="empty">No computation steps recorded.</p></section>')
+        return "\n".join(h)
+    a('<p class="sub">Each step is its own signed <code>ComputationRegistration</code>. Inputs on the left, '
+      'outputs on the right; each one carries its own content-address result.</p>')
+    notes = mo.get("step_notes") or {}
+    prev = None
+    cards = []
+    for st in steps:
+        s = J["states"][st["n"]]
+        t = _parse_ts(st["timestamp"])
+        delta = (" · +%s" % _elapsed((t - prev).total_seconds())) if (t and prev) else ""
+        prev = t or prev
+        tag = " · ".join(x for x in [st.get("site"), st.get("type")] if x)
+        what = notes.get(st["statement_id"]) or notes.get(str(st["n"]))
+        c = []
+        c.append('<div class="step"><div class="snum n-%s">%d</div><div class="sbody %s">' % (
+            s["cls"] if s["cls"] != "ok" else "", st["n"], ("s-" + s["cls"]) if s["cls"] in ("bad", "warn") else ""))
+        c.append('<div class="shead"><b>%s</b><span class="t">%s%s</span>%s</div>' % (
+            E(st["name"]), E(_clock(st["timestamp"])), E(delta),
+            ('<span class="tag">%s</span>' % E(tag)) if tag else ""))
+        if what:
+            c.append('<p class="what">%s</p>' % E(what))
+        c.append(_env_line(mo, J, st))
+        if s["cls"] in ("bad", "warn") and s["reasons"]:
+            c.append('<div class="env">%s</div>' % "".join(_pill(s["cls"], r) for r in s["reasons"]
+                                                           if "executedOn" not in r))
+        c.append('<div class="io"><div class="in"><h4>CONSUMED</h4>%s</div><div class="arrow">→</div>'
+                 '<div class="out"><h4>PRODUCED</h4>%s</div></div>' % (_chips(J, st["inputs"]), _chips(J, st["outputs"])))
+        c.append("</div></div>")
+        cards.append("".join(c))
+    a('<div class="steps">%s</div>' % "".join(cards[:STEP_CARD_LIMIT]))
+    if len(cards) > STEP_CARD_LIMIT:
+        a('<details><summary>%d more steps</summary><div class="steps">%s</div></details>' % (
+            len(cards) - STEP_CARD_LIMIT, "".join(cards[STEP_CARD_LIMIT:])))
+    a("</section>")
+    return "\n".join(h)
+
+
+def _composition_html(mo):
+    counts = sorted(mo["metrics"]["statement_types"].items(), key=lambda kv: (-kv[1], kv[0]))
+    total = sum(v for _, v in counts) or 1
+    h = ['<section class="card"><h2>Statement composition</h2>',
+         '<p class="sub">How the %d signed statements break down by type.</p>' % total,
+         '<div class="comp"><svg width="190" height="190" viewBox="0 0 42 42" role="img" aria-label="%s">' % E(
+             ", ".join("%d %s" % (v, k) for k, v in counts))]
+    a = h.append
+    cum = 0.0
+    for i, (k, v) in enumerate(counts):
+        pct = 100.0 * v / total
+        # circumference 100 at r=15.915; offset 25 starts the ring at 12 o'clock
+        a('<circle cx="21" cy="21" r="15.915" fill="none" stroke="%s" stroke-width="6" '
+          'stroke-dasharray="%.3f %.3f" stroke-dashoffset="%.3f"><title>%d %s</title></circle>' % (
+              DONUT_COLORS[min(i, len(DONUT_COLORS) - 1)], pct, 100 - pct, 25 - cum, v, E(k)))
+        cum += pct
+    a('<text x="21" y="21.5" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor">%d</text>' % total)
+    a('<text x="21" y="26.5" text-anchor="middle" font-size="2.6" fill="currentColor" opacity=".6">statements</text></svg>')
+    a('<div class="clegend">')
+    for i, (k, v) in enumerate(counts):
+        a('<div><i style="background:%s"></i>%s <small>%s</small><span>%d</span></div>' % (
+            DONUT_COLORS[min(i, len(DONUT_COLORS) - 1)], E(FRIENDLY_TYPES.get(k, k)),
+            E(k) if k in FRIENDLY_TYPES else "", v))
+    a("</div></div></section>")
+    return "\n".join(h)
+
+
+def _identity_desc(info):
+    bits = []
+    if info.get("pod"):
+        bits.append("Pod <code>%s</code>%s" % (E(info["pod"].get("name") or "?"),
+                    (", namespace <code>%s</code>" % E(info["pod"]["namespace"])) if info["pod"].get("namespace") else ""))
+    if info.get("containers"):
+        bits.append("container%s %s" % ("" if len(info["containers"]) == 1 else "s",
+                                         ", ".join("<code>%s</code>" % E(c) for c in info["containers"])))
+    return ". ".join(bits)
+
+
+def _identities_html(mo, J):
+    ids = mo["identities"]
+    parts = {p["did"]: p for p in mo["participants"] if p.get("did")}
+    v = mo["trust"].get("verification")
+    tally = {d: t for d, t in (v or {}).get("signers", [])}
+    refs = Counter(l["did"] for l in J["links"])
+    missing = {d for d, ok in J["present"].items() if not ok}
+    targets = set(refs)
+    systems = (set(J["hw"]) | {d for d, i in ids.items() if i.get("registered") or i.get("evidence_types")}
+               | missing | (targets & set(ids)))
+    everyone = set(ids) | set(parts) | {d for d in tally if str(d).startswith("did:")}
+    operators = {s.get("operatedBy") for s in mo["steps"] if s.get("operatedBy")}
+    workloads = sorted(everyone - systems, key=lambda d: -(parts.get(d) or {}).get("statements", 0))
+    op_only = sorted(operators - everyone - systems)
+
+    h = ['<section class="card"><h2>Signing identities</h2>',
+         '<p class="sub">Hardware-rooted identities first. The solid purple style appears only when the '
+         'hardware evidence actually verified; a claim the verifier could not check is never styled as verified.</p>',
+         '<div class="stylekey"><span style="border:2px solid var(--hw);background:var(--hw-bg)">hardware verified</span>'
+         '<span style="border:2px dashed var(--warn);background:var(--warn-bg)">claimed, not verified</span>'
+         '<span style="border:2px solid var(--bad);background:var(--bad-bg)">failed, or referenced but not in manifest</span></div>']
+    a = h.append
+
+    def counts(d):
+        p = parts.get(d) or {}
+        t = tally.get(d)
+        out = "%d statement%s" % (p.get("statements", 0), "" if p.get("statements", 0) == 1 else "s")
+        if refs.get(d):
+            out += " · %d executedOn reference%s" % (refs[d], "" if refs[d] == 1 else "s")
+        return out, t
+
+    def cred_pill(t):
+        if not t:
+            return ""
+        if t["verified"] == t["total"]:
+            return _pill("ok", "%d/%d credentials valid" % (t["verified"], t["total"]))
+        return _pill(_tally_cls(t), "%d/%d credentials valid" % (t["verified"], t["total"]))
+
+    if systems:
+        a('<div class="grp">Hardware-rooted / host identities</div>')
+    for d in sorted(systems, key=lambda d: (d not in missing, -(refs.get(d) or 0))):
+        info = ids.get(d) or {}
+        cnt, t = counts(d)
+        title = " + ".join(info.get("types") or []) or "System"
+        if d in missing and not info and d not in J["hw"]:
+            a('<div class="id missing"><div class="top"><b>%s</b>%s<span class="cnt">%s</span></div>'
+              '<div class="did">%s</div><p>Named as <code>executedOn</code> %d time%s, but this manifest gives it '
+              'no identity: no DID registration, no identity attestation, no hardware evidence. Nothing about '
+              'this system can be checked from this file.</p></div>' % (
+                  "Unidentified system", _pill("bad", "not in manifest"), E(cnt), E(d),
+                  refs.get(d, 0), "" if refs.get(d, 0) == 1 else "s"))
+            continue
+        hcls, htxt = J["hw_state"](d) if J["verified"] else ("none", "hardware not checked (--no-verify)")
+        box = {"ok": "hw-ok", "warn": "hw-claim", "bad": "missing"}.get(hcls, "")
+        a('<div class="id %s"><div class="top"><b>%s</b>%s%s<span class="cnt">%s</span></div><div class="did">%s</div>' % (
+            box, E(title), _pill("unk" if hcls == "none" else hcls, htxt), cred_pill(t), E(cnt), E(d)))
+        for i in J["hw"].get(d, []):
+            if SM_nothing(i):
+                a('<span class="ev warn">%s · nothing to check — %s</span>' % (E(i.get("format") or "evidence"), E(SM_nothing(i))))
+                continue
+            st = lambda x: {True: "verified", False: "FAILED", None: "not checked"}[x]
+            worst = ("bad" if False in (i["signature"], i["chain"], i.get("key_binding")) else
+                     "ok" if i["signature"] is True and (i["chain"] is True or i.get("chain_via_binding")) else "warn")
+            a('<span class="ev %s">%s · signature %s · chain %s · key %s</span>' % (
+                worst, E(i.get("format") or "evidence"), st(i["signature"]),
+                "via binding" if i.get("chain_via_binding") else st(i["chain"]), st(i.get("key_binding"))))
+        desc = _identity_desc(info)
+        if desc:
+            a("<p>%s.</p>" % desc)
+        if d in missing:
+            a("<p>Some <code>executedOn</code> links name this DID, but the manifest carries no identity for it.</p>")
+        a("</div>")
+
+    if workloads:
+        a('<div class="grp">Workload identities</div>')
+    for d in workloads:
+        info = ids.get(d) or {}
+        cnt, t = counts(d)
+        p = parts.get(d) or {}
+        title = " + ".join(info.get("types") or []) or (p.get("role") or "Signer")
+        a('<div class="id"><div class="top"><b>%s</b>%s<span class="cnt">%s</span></div><div class="did">%s</div>' % (
+            E(title), cred_pill(t), E(cnt), E(d)))
+        desc = _identity_desc(info)
+        lines = [desc] if desc else []
+        for host in info.get("executedOn") or []:
+            hn = J["names"].get(host) or _short(host, 22)
+            if not J["verified"]:
+                lines.append("Claims to run on <code>%s</code> (not checked)" % E(hn))
+            elif J["present"].get(host) is False:
+                lines.append("Claims to run on <code>%s</code>, %s" % (E(_short(host, 22)), _pill("bad", "not in this manifest")))
+            else:
+                hcls, htxt = J["hw_state"](host)
+                lines.append("Bound to <code>%s</code> via <code>executedOn</code> %s" % (
+                    E(hn), _pill("unk" if hcls == "none" else hcls, htxt)))
+        if p.get("steps_operated"):
+            lines.append("Operates %d step%s" % (p["steps_operated"], "" if p["steps_operated"] == 1 else "s"))
+        if lines:
+            a("<p>%s.</p>" % ". ".join(lines))
+        a("</div>")
+
+    for d in op_only:
+        n = sum(1 for s in mo["steps"] if s.get("operatedBy") == d)
+        a('<div class="id" style="border-style:dashed"><div class="top"><b>Operator only</b><span class="cnt">0 statements</span></div>'
+          '<div class="did">%s</div><p>Appears as <code>operatedBy</code> on %d step%s but signs nothing in this manifest; '
+          'nothing here vouches for it on its own.</p></div>' % (E(d), n, "" if n == 1 else "s"))
+    a('<p class="note" style="margin-top:14px">A claimed environment is not a proven one. Even verified hardware '
+      'evidence establishes genuine vendor hardware holding the signing key, not which code ran on it: '
+      'measurements are not compared with reference values.</p>')
+    a("</section>")
+    return "\n".join(h)
+
+
+def SM_nothing(i):
+    try:
+        import summary as SM
+        return SM.nothing_to_check(i)
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _provenance_html(mo):
+    src = mo["source"]
+    rows = [("Manifest file", src["file"]), ("Manifest SHA-256", src.get("sha256") or "—"),
+            ("Manifest version", str(src["manifest_version"])), ("Report generated", src["generated"]),
+            ("Generator", "eqty-manifest/report.py"),
+            ("Verification", "run at generation time" if src["verified"] else "SKIPPED (--no-verify)"),
+            ("Timestamps", "as written by each signer, on their own clocks; shown in the zone each one carries (Z = UTC)"),
+            ("Reproduce", "uv run eqty-manifest/summary.py %s" % src["file"])]
+    return ('<section class="card"><h2>Provenance</h2><p class="sub">What you need to rerun every check above '
+            'independently.</p><div class="prov">%s</div></section>' % "".join(
+                "<b>%s</b><span>%s</span>" % (E(k), E(v)) for k, v in rows))
+
+
+# Glossary: a term is listed only when its trigger pattern appears in the
+# visible text of THIS report (computed after every other section renders),
+# so a report with no TDX evidence carries no TDX entry. Definitions are
+# general, never about any particular manifest.
+GLOSSARY = [
+    ("CID", r"urn:cid:|\bCIDs?\b|content-address",
+     "Content identifier: an address computed from a hash of the data itself. The same bytes always give the same CID; change one byte and the CID changes."),
+    ("Blob", r"\bblobs?\b",
+     "A piece of content (a prompt, file, model output or piece of evidence) carried in the manifest, base64-encoded and named by its CID."),
+    ("Pre-image", r"pre-image",
+     "The actual bytes behind a CID. A missing pre-image is a CID the manifest references but does not carry, so its hash cannot be recomputed."),
+    ("Orphaned blob", r"[Oo]rphaned",
+     "A blob carried in the manifest that no statement refers to, even after following collections."),
+    ("By reference", r"by reference",
+     "Content the signer declared as committed by CID only. Its bytes were left out on purpose, so it cannot be checked without the original file."),
+    ("Statement", r"\bstatements?\b",
+     "One signed entry in the manifest, identified by the hash of its own content (its @id)."),
+    ("did:key", r"did:key",
+     "A self-certifying decentralized identifier: the public key is encoded in the identifier itself, so signatures can be checked offline."),
+    ("Verifiable Credential (VC)", r"[Cc]redential",
+     "A signed claim in the W3C format. Here it signs a statement or attests an identity; a valid signature shows who signed and that the claim is unchanged."),
+    ("Credential seal", r"Credential seals|CredentialRegistration",
+     "A CredentialRegistration: the statement that carries a credential signing another statement."),
+    ("MetadataRegistration", r"MetadataRegistration|Metadata registrations",
+     "Attaches a human-readable label or description to a CID, a statement or an identity."),
+    ("DataRegistration", r"DataRegistration|Data registrations",
+     "Registers a piece of data, by its CID, as part of the record."),
+    ("ComputationRegistration", r"ComputationRegistration|Computation registrations",
+     "One compute step: what it consumed, what it produced, who operated it, and where it claims to have run."),
+    ("DidRegistration", r"DidRegistration|DID registrations",
+     "Registers a DID together with a description of the environment it belongs to."),
+    ("IdentityAttestation", r"IdentityAttestation",
+     "A credential stating what a DID is (a machine, a confidential VM, a pod), which may carry hardware evidence for it."),
+    ("Sigstore attestation", r"Sigstore",
+     "A signed in-toto/DSSE bundle about an artifact outside the manifest, checked against the did:key it names."),
+    ("executedOn", r"executedOn",
+     "The DID of the environment a step or workload claims to have run on. A claim, not proof: only verified hardware evidence for that DID backs it."),
+    ("operatedBy", r"operatedBy|[Oo]perator",
+     "The DID of the component that ran a step. An operator that signs nothing is vouched for only by whatever attests where it runs."),
+    ("Registration drift", r"not hash to (its|their) @id|does not re-hash",
+     "A registration whose credential verifies but whose own bytes no longer hash to its @id. From the manifest alone, tampering and drift from an older emitter look the same."),
+    ("Not checked", r"not checked|nothing to check",
+     "The check could not run (missing evidence, unsupported type, missing dependency). Unknown: never a pass, and not a failure."),
+    ("Confidential VM", r"[Cc]onfidential|TDX|IntelTdx|SevSnp|AmdSev|CoCoPod",
+     "A virtual machine whose memory the CPU encrypts and isolates from the host and hypervisor, and which can produce signed evidence of its state."),
+    ("Intel TDX", r"TDX|IntelTdx|intel-tdx",
+     "Intel Trust Domain Extensions: CPU-level VM isolation with per-VM memory encryption and remotely verifiable measurements."),
+    ("MRTD / RTMR", r"mrtd|rtmr|MRTD|RTMR",
+     "TDX measurement registers: digests of the VM's initial image (MRTD) and of later runtime events (RTMRs)."),
+    ("NVIDIA CC", r"NvidiaCc|nvidia-cc|NVIDIA CC|NVIDIA [Cc]onfidential",
+     "NVIDIA confidential-computing mode: GPU memory encryption and isolation, with a per-device certificate chain and a signed GPU attestation report."),
+    ("SPDM", r"spdm|SPDM",
+     "Security Protocol and Data Model: the protocol an NVIDIA GPU uses to produce its signed attestation report."),
+    ("AMD SEV-SNP", r"AmdSev|SevSnp|SEV|sev-snp",
+     "AMD Secure Encrypted Virtualization with Secure Nested Paging: AMD's confidential-VM technology, with reports signed by a chip-specific key that chains to AMD."),
+    ("TPM quote", r"Tpm|TPM",
+     "A Trusted Platform Module's signed statement of its measurement registers. Trusted here only when its attestation key is bound to a verified hardware report."),
+    ("CCEL", r"ccel|CCEL",
+     "Confidential Computing Event Log: the append-only log of measured launch events for a confidential VM."),
+    ("Report signature", r"[Rr]eport signature|· signature ",
+     "Whether a hardware report is signed by the key its evidence names."),
+    ("Vendor chain", r"[Vv]endor chain|· chain ",
+     "Whether that key's certificate chain reaches a vendor root (Intel, AMD, NVIDIA) pinned in the verifier."),
+    ("Hardware binding", r"[Hh]ardware binding",
+     "A key or claim tied to another hardware report that itself verified, e.g. a TPM attestation key bound to an AMD report."),
+    ("Key binding", r"[Kk]ey binding|· key ",
+     "Whether the signed hardware evidence carries the public key of the DID it vouches for: whether that hardware vouches for that identity."),
+    ("Confidential pod", r"CoCoPod",
+     "A Kubernetes pod run as its own confidential VM (Confidential Containers). Its identity names its containers and the host it runs on."),
+]
+
+
+def _visible_text(fragment):
+    import re
+    t = re.sub(r"<style.*?</style>|<title>.*?</title>", " ", fragment, flags=re.S)
+    return html.unescape(re.sub(r"<[^>]+>", " ", t))
+
+
+def _glossary_html(body):
+    import re
+    text = _visible_text(body)
+    rows = [(term, meaning) for term, pat, meaning in GLOSSARY if re.search(pat, text)]
+    if not rows:
+        return ""
+    return ('<section class="card"><h2>Glossary</h2><p class="sub">Only the terms that appear in this report.</p>'
+            '<div class="scroll"><table><thead><tr><th>Term</th><th>Meaning here</th></tr></thead><tbody>%s'
+            '</tbody></table></div></section>' % "".join(
+                "<tr><td class='mono' style='white-space:nowrap'>%s</td><td>%s</td></tr>" % (E(t), E(m)) for t, m in rows))
+
+
+def render_html(mo):
+    src, me, tr = mo["source"], mo["metrics"], mo["trust"]
+    J = _join_state(mo)
+    J["names"] = {}
+    for d, info in (mo.get("identities") or {}).items():
+        if info.get("types"):
+            J["names"][d] = "%s %s" % (" + ".join(info["types"]), _short(d, 18))
+    h = []
+    a = h.append
+    a("<title>%s — EQTY verifiable execution report</title>" % E(mo.get("title") or src["file"]))
+    a('<meta name="viewport" content="width=device-width,initial-scale=1">')
     a("<style>%s</style>" % CSS)
     a('<div class="wrap">')
-    a("<h1>%s</h1>" % E(src["file"]))
-    a('<p class="sub">%s</p>' % E(subtitle))
-
-    a('<div class="strip">')
-    for label, val in [("statements", me["statements"]), ("blobs", me["blobs"]),
-                       ("signers", me["signers"]), ("steps", me["steps"]),
-                       ("orphaned blobs", me["orphaned_blobs"])]:
-        a("<div><b>%s</b><span>%s</span></div>" % (val, E(label)))
-    a("</div>")
+    a(_hero_html(mo, J))
 
     vsum = tr.get("verification")
     rows = [_content_row(tr["content"]), _sig_row(tr["signatures"]),
@@ -928,144 +1712,62 @@ def render_html(mo):
     pills = _summary_pills(vsum) if vsum else [
         (name, cls, text) for (cls, text), name in
         zip(rows, ["content", "signatures", "statement integrity", "attestation"])]
-    a('<div class="pills">')
-    for name, cls, text in pills:
-        a(_pill(cls, "%s: %s" % (name, text)))
-    a("</div>")
+
+    # --- verification ----------------------------------------------------
+    a('<section class="card">')
+    if vsum:
+        a(_verification_html(vsum, pills))
+    else:
+        a('<div class="pills">%s</div>' % "".join(_pill(cls, "%s: %s" % (n, t)) for n, cls, t in pills))
+        _legacy_trust(a, tr, rows)
     a('<p class="gen">Generated %s from manifest version %s by <code>eqty-manifest/report.py</code>.%s</p>'
       % (E(src["generated"]), E(str(src["manifest_version"])),
          "" if src["verified"] else " <strong>Verification was skipped (--no-verify).</strong>"))
+    a("</section>")
 
-    # --- what this run was ------------------------------------------------
-    a("<h2>What this run was</h2>")
+    # --- what this run was -----------------------------------------------
+    a('<section class="card"><h2>What this run was</h2>')
     if mo.get("narrative"):
         a('<div class="narr">%s</div>' % _narrative_html(mo["narrative"]))
     else:
-        a('<p class="empty">No narrative was supplied. Everything below is computed '
-          'directly from the manifest; the interpretation of <em>what the run meant</em> '
-          'is the one thing this script cannot derive — pass it with '
-          '<code>--narrative &lt;file&gt;</code>.</p>')
-    a("<table><tbody>")
-    for k, v in [("Kind", hl["kind"]), ("Framework", hl["framework"]),
-                 ("Started", hl["start"]), ("Ended", hl["end"]),
-                 ("Wall clock", hl["wall_clock"]),
-                 ("Statement types", ", ".join("%d %s" % (v2, k2) for k2, v2 in
-                                               sorted(me["statement_types"].items(),
-                                                      key=lambda kv: -kv[1])))]:
-        if v:
-            a("<tr><th>%s</th><td>%s</td></tr>" % (E(k), E(str(v))))
-    a("</tbody></table>")
+        a('<p class="empty">No narrative was supplied. Everything else on this page is computed directly '
+          'from the manifest; what the run <em>meant</em> is the one thing the script cannot derive — pass it '
+          'with <code>--narrative &lt;file&gt;</code>.</p>')
+    a("</section>")
 
-    # --- trust ------------------------------------------------------------
-    if vsum:
-        a(_verification_html(vsum))
-    else:
-        _legacy_trust(a, tr, rows)
-
-    att = tr["attestation"]
-    a("<h3>Execution environments — claims</h3>" if vsum else "<h3>Execution environments</h3>")
-    if att["steps_claiming_environment"]:
-        a("<p>%d of %d steps name an environment (%s). %d name none.</p>" % (
-            att["steps_claiming_environment"], att["steps_total"],
-            E(", ".join("%s × %d" % (k, v) for k, v in sorted(att["claimed_types"].items())
-                        if k)) or "type unstated", att["steps_without_claim"]))
-        a('<p class="note">A claimed environment is not a proven one. Even where TEE '
-          'evidence verifies, that establishes authentic vendor hardware and an intact '
-          'report — <strong>not</strong> which code ran, since reference measurements '
-          'are not checked.</p>')
-    else:
-        a('<p class="empty">No step in this manifest declares an <code>executedOn</code> '
-          'environment. That is not the same as running somewhere untrusted, and it is '
-          'not the same as attested: the manifest simply asserts nothing about where '
-          'these steps ran.</p>')
-
-    if tr["problems"] and not vsum:
-        a("<h3>Integrity problems</h3><div class='scroll'><table><thead><tr><th>Reason</th>"
-          "<th>Issue</th><th>Subject</th><th>Detail</th></tr></thead><tbody>")
-        order = list(PROBLEM_REASONS)
-        for p in sorted(tr["problems"], key=lambda p: order.index(p.get("issue"))
-                        if p.get("issue") in order else len(order)):
-            cls, reason = PROBLEM_REASONS.get(p.get("issue"), ("unk", "other"))
-            a("<tr><td>%s</td><td><code>%s</code></td><td class='did'>%s</td><td>%s</td></tr>" % (
-                _pill(cls, reason), E(str(p.get("issue"))), E(str(p.get("cid") or "—")),
-                E(str(p.get("detail") or ""))))
-        a("</tbody></table></div>")
-
-    # --- participants -----------------------------------------------------
-    a("<h2>Participants</h2>")
-    a('<div class="scroll"><table><thead><tr><th>Role</th><th>Identity</th>'
-      "<th class='num'>Statements</th><th class='num'>Steps</th><th>Signed</th>"
-      "</tr></thead><tbody>")
-    for p in mo["participants"]:
-        a("<tr><td>%s</td><td class='did'>%s%s</td><td class='num'>%d</td>"
-          "<td class='num'>%d</td><td>%s</td></tr>" % (
-              E(p["role"] or "signer"), E(str(p["did"])),
-              " <em>(has entity metadata)</em>" if p["has_entity_metadata"] else "",
-              p["statements"], p["steps_operated"],
-              E(", ".join(p["step_names"]) or "—")))
-    a("</tbody></table></div>")
-    if len(mo["participants"]) == 1:
-        a('<p class="note">A single key signed every statement, so this manifest carries '
-          'no separation of signing responsibility — one compromised key would account '
-          'for all of it.</p>')
-
-    # --- how the run unfolded --------------------------------------------
-    ru = mo["rollup"]
-    a("<h2>How the run unfolded</h2>")
-    a('<p class="note">%d step%s grouped into %d phase%s by %s.</p>' % (
-        me["steps"], "" if me["steps"] == 1 else "s",
-        len(ru["phases"]), "" if len(ru["phases"]) == 1 else "s", ru["basis"]))
-    for ph in ru["phases"]:
-        a('<div class="phase"><h3><span>%s</span><em>%s · %d step%s%s</em></h3>' % (
-            E(ph["label"]), E(_clock(ph["start"])), ph["step_count"],
-            "" if ph["step_count"] == 1 else "s",
-            " · " + E(ph["duration"]) if ph["duration"] and ph["duration"] != "<1 s" else ""))
-        a('<p class="chain">%s</p>' % E(ph["chain"]))
-        if ph["operators"]:
-            a('<p class="made">Run by <b>%s</b></p>' % E(", ".join(ph["operators"])))
-        if ph["produced"]:
-            shown = ph["produced"][:6]
-            a('<p class="made">Produced <b>%s</b>%s</p>' % (
-                "</b>, <b>".join(E(x) for x in shown),
-                " and %d more" % (len(ph["produced"]) - 6) if len(ph["produced"]) > 6 else ""))
-        a("</div>")
-
-    # --- appendix ---------------------------------------------------------
-    a("<h2>Appendix — every step</h2>")
-    a('<div class="scroll"><table><thead><tr><th class="num">#</th><th>Time</th><th>Step</th>'
-      "<th>Type</th><th>Operator</th><th>Environment</th><th>Signed</th>"
-      "</tr></thead><tbody>")
-    by_subject = (tr["signatures"].get("by_subject") or {})
-    for st in mo["steps"]:
-        env = st["environment"] or {}
-        envtxt = (env.get("type") or "claimed, type unstated") if env.get("environment_claimed") \
-            else "none claimed"
-        sig = by_subject.get(st["statement_id"])
-        sigtxt = {True: "✓", False: "✗ FAILED", None: "—"}.get(sig, "—")
-        a("<tr><td class='num'>%d</td><td>%s</td><td><strong>%s</strong></td><td>%s</td>"
-          "<td>%s</td><td>%s</td><td>%s</td></tr>" % (
-              st["n"], E(_clock(st["timestamp"])), E(st["name"]), E(st["type"] or "—"),
-              E(st["site"] or _short(st["operatedBy"], 12) or "—"), E(envtxt), sigtxt))
-    a("</tbody></table></div>")
-    a('<p class="note">The <em>Signed</em> column reports the credential whose '
-      '<code>credentialSubject.id</code> is that step. A dash means no credential '
-      'names this statement directly — not that a check failed.</p>')
-
-    a("<h3>Inputs and outputs</h3>")
-    a('<div class="scroll"><table><thead><tr><th class="num">#</th><th>Step</th>'
-      "<th>In</th><th>Out</th></tr></thead><tbody>")
-    for st in mo["steps"]:
-        a("<tr><td class='num'>%d</td><td><strong>%s</strong></td><td>%s</td><td>%s</td></tr>" % (
-            st["n"], E(st["name"]),
-            "<br>".join(E(x["label"]) for x in st["inputs"]) or "—",
-            "<br>".join(E(x["label"]) for x in st["outputs"]) or "—"))
-    a("</tbody></table></div>")
-
-    a("<footer>Self-contained report — no external assets, no scripts, no network access. "
-      "Every figure above was computed from <code>%s</code> at generation time; "
-      "nothing is transcribed from a conversation.</footer>" % E(src["file"]))
+    a(_timeline_html(mo, J))
+    a(_steps_html(mo, J))
+    a(_composition_html(mo))
+    a(_identities_html(mo, J))
+    a(_glossary_html("\n".join(h)))
+    a(_provenance_html(mo))
+    a("<footer>Self-contained report: no external assets, no scripts, no network access. Every figure was "
+      "computed from <code>%s</code> at generation time. Read it as a technical walkthrough, not a compliance "
+      "attestation in itself.</footer>" % E(src["file"]))
     a("</div>")
     return "\n".join(h)
+
+
+
+SESSION_OPENERS = ("The session", "This session")
+SESSION_MAX_SENTENCES = 2
+
+
+def session_problem(text):
+    """The header's session line: one or two sentences, opening with "The
+    session" or "This session", so it reads as the work the run did and never
+    as a description of the manifest (the computed sentence after it does that).
+    Returns why the text is refused, or None."""
+    import re
+    t = (text or "").strip()
+    if not t.startswith(SESSION_OPENERS):
+        return 'must start with "The session" or "This session"'
+    # a sentence ends at . ! or ? followed by whitespace and a capital letter;
+    # abbreviations like "e.g." or "Inc. and" do not end one
+    n = len(re.findall(r"[.!?][\"')\]]*\s+(?=[A-Z])", t)) + 1
+    if n > SESSION_MAX_SENTENCES:
+        return "must be at most %d sentences (got %d)" % (SESSION_MAX_SENTENCES, n)
+    return None
 
 
 def main():
@@ -1076,6 +1778,15 @@ def main():
     ap.add_argument("--narrative", metavar="FILE",
                     help="markdown/plain-text prose for the 'What this run was' section, "
                          "authored by the agent that interpreted the manifest")
+    ap.add_argument("--title", metavar="TEXT",
+                    help="headline for the report; defaults to the run kind the manifest's metadata implies")
+    ap.add_argument("--session", metavar="TEXT",
+                    help="one or two sentences on what the session did, starting 'The session' or "
+                         "'This session', every word backed by the manifest; "
+                         "the second header sentence (about the manifest itself) is computed")
+    ap.add_argument("--step-notes", metavar="FILE",
+                    help="JSON object mapping a step's statement id (or its 1-based number) to one "
+                         "manifest-backed line saying what that step does")
     ap.add_argument("--no-verify", action="store_true",
                     help="skip signature and attestation-evidence verification; the report "
                          "then says the checks were skipped rather than implying they passed")
@@ -1089,7 +1800,18 @@ def main():
         with open(args.narrative) as f:
             narrative = f.read()
 
-    model = build_model(args.manifest, narrative, verify=not args.no_verify)
+    if args.session is not None:
+        problem = session_problem(args.session)
+        if problem:
+            ap.error("--session %s" % problem)
+
+    step_notes = None
+    if args.step_notes:
+        with open(args.step_notes) as f:
+            step_notes = {str(k): str(v) for k, v in json.load(f).items()}
+
+    model = build_model(args.manifest, narrative, verify=not args.no_verify,
+                        title=args.title, session=args.session, step_notes=step_notes)
     with open(args.out, "w") as f:
         f.write(render_html(model))
     if args.json:

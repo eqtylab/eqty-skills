@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.5 — 2026-10-06
+
+- **eqty-manifest** — the HTML report takes three more inputs written by the
+  agent, beside the narrative: `--title` (the run's name, from the manifest's
+  metadata), `--session` (one or two sentences on what the session did, starting
+  "The session" or "This session"; the script refuses anything else) and
+  `--step-notes` (a JSON object of one plain line per compute step). Like the
+  narrative, they are scratch, consumed into the HTML. The report gains a stat
+  strip, a timeline coloured by each step's verification state, a card per
+  compute step with what it consumed and produced, signing identities grouped by
+  how they are rooted, and a glossary of only the terms the page uses.
+  `SKILL.md` documents the layout and how to write each input.
+
 ## 0.2.4 — 2026-10-02
 
 - **eqty-instrument** — the Mode 2 CFG agents are told what their diagram is

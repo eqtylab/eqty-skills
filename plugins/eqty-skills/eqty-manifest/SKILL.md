@@ -356,13 +356,50 @@ no scripts, no network:
 # Structure, participants, phases and all three trust checks, computed
 uv run <skill-dir>/report.py manifest.json report.html
 
-# With your own interpretation slotted into "What this run was" — do this
-# whenever you have actually read the run, because it is the one section
-# the script cannot produce. The notes file is scratch: it is consumed
-# into the HTML and does not ship.
+# With your own interpretation slotted in — do this whenever you have
+# actually read the run, because these are the only parts the script cannot
+# produce. Every authored input is scratch: consumed into the HTML, never shipped.
 uv run <skill-dir>/report.py manifest.json report.html \
+    --title "<agent or graph name>: <the task, from the manifest's metadata>" \
+    --session "The session <did what, with what input, and what it returned>." \
+    --step-notes "$SCRATCH/steps.json" \
     --narrative "$SCRATCH/notes.md"
 ```
+
+### The report layout
+
+`report.py` renders these sections, in this order. Only the four authored
+inputs above are yours; everything else is computed and must not be
+hand-edited afterwards.
+
+| Section | What it shows | Source |
+|---|---|---|
+| Header | `--title`; then **one or two** sentences on what the session did, starting "The session" or "This session" (`--session`); then a computed sentence about the *manifest* (file, statement/blob/signer counts, step count and time span); then the stat strip: **executed on** date (from the computation steps' timestamps), statements, blobs, signers, steps, orphaned blobs | authored + computed |
+| Verification summary | the separate check pills (never one verdict), the summary.py table, each problem kind with a plain-language *What it means* / *What would settle it* line above its raw verifier lines, signers, hashes, execution-environment evidence | computed |
+| What this run was | `--narrative` | authored |
+| Timeline | horizontal, dots placed by elapsed time; dot colour is each step's verification state (signature, `executedOn` resolution, input/output hashes); phases behind a `<details>` when there is more than one | computed |
+| Compute steps | one card per `ComputationRegistration`: name, time, +delta, the step's line from `--step-notes`, its `executedOn` result and that host's hardware result, then **CONSUMED → PRODUCED** chips, each with its own content-address result | computed + `--step-notes` |
+| Statement composition | donut of every statement type, credential seals included | computed |
+| Signing identities | hardware-rooted / host identities first, then workloads, then operators that sign nothing. Solid purple only when the hardware evidence verified; dashed amber when claimed but not verified; red when it failed or is referenced but absent | computed |
+| Glossary | plain definitions of the terms this page actually uses — a term whose pattern never appears in the rendered report (TDX on a manifest with no TDX evidence, say) is left out. Definitions are fixed in `report.py` (`GLOSSARY`); add a term there, with its trigger pattern, rather than writing one into a report | computed |
+| Provenance | file, SHA-256, manifest version, generation time, whether verification ran, how to rerun it | computed |
+
+Writing the authored inputs — all of rule 1 applies to each:
+
+- **`--title`**: names the run from the manifest's own metadata (agent or
+  graph name, task). Defaults to the run kind when omitted.
+- **`--session`**: one or two sentences, never more, and the first word must
+  be "The session" or "This session" (the script refuses anything else). Say
+  what the session *did* — the request and the outcome — as the timeline's
+  resolved content shows it. Not whether it
+  verified, not how it was instrumented. Do not describe the manifest here; the
+  sentence after it is computed and already does.
+- **`--step-notes`**: a JSON object, `{"<statement id or 1-based step number>":
+  "<one line>"}`. One plain line per step saying what that step did, read from
+  its resolved inputs and outputs (`timeline`, `show`). Skip a step rather than
+  guess. Never put a verification word in a step note: the card already shows
+  the step's computed state next to it.
+- **`--narrative`**: as before — what the run was, after the verified run.
 
 **Write the narrative after the verified run, and only about what the run
 did** — the task, the steps, the tools, the output. Never state in it whether
@@ -408,7 +445,8 @@ Typical workflow for answering a user's question:
    prone.
 6. If the user wants something to keep, read, or pass on — "a report," "a
    summary I can send," "make this readable" — run `report.py` and pass
-   your own interpretation via `--narrative`. Don't hand-author HTML: the
+   your own interpretation via `--title`, `--session`, `--step-notes` and
+   `--narrative` (see "The report layout"). Don't hand-author HTML: the
    script computes the trust numbers, and a report whose figures you typed
    is hearsay with styling. The HTML is the only file you leave behind;
    steps 1–5 above are reading, not writing.
