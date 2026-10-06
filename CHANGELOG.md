@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.7 — 2026-10-06
+
+- **eqty-instrument** — the CFG agent audit catches more ways of running code.
+  `./x` now counts as a command after a backtick, a newline or a brace group
+  (`{ ./x; }`), and behind a launcher such as `xargs`, `exec` or `env`
+  (`xargs -n1 ./x`, `env A=1 ./x`, `exec python3 x`). Before, these ran the
+  target without failing the run. `./x` given as an argument and globs such as
+  `**/x.py` still pass.
+
 ## 0.2.6 — 2026-10-06
 
 - **eqty-instrument** — under Codex, the CFG agents no longer see your own

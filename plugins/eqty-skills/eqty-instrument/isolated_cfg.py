@@ -203,9 +203,14 @@ def command_escapes(command, workdir):
         return "parent directory"
     if re.search(r"\b(?:curl|wget|ssh|scp|nc|pip3?|npm|uv|git)\b", body):
         return "network or install command"
-    # `./x` runs only as a command, never as an argument after a quote (`sed -n '1,9p' ./x`)
-    if re.search(r"(?:^|[;&|(]\s*|['\"]\s*)(?:python[\d.]*|pytest|ipython|jupyter|node|ruby|perl|make|poetry|pdm|hatch|tox"
-                 r"|conda|sh|bash|zsh)(?=[\s'\"]|$)|(?:^['\"]?|[;&|(])\s*\./\S+", body):
+    # `./x` runs only as a command, never as an argument after a quote (`sed -n '1,9p' ./x`).
+    # A command starts the body or follows ; & | ( ` a newline or `{ `, and may sit behind
+    # a launcher that runs its argument (`xargs -n1 ./x`, `env A=1 ./x`).
+    launcher = r"(?:(?:xargs|exec|env|nohup|time|nice|command)(?:\s+(?:-\S+|\d+|\w+=\S*))*\s+)*"
+    sep = r"[;&|(`\n]|\{(?=\s)"
+    if re.search(r"(?:^|(?:%s)\s*|['\"]\s*)%s(?:python[\d.]*|pytest|ipython|jupyter|node|ruby|perl|make|poetry|pdm"
+                 r"|hatch|tox|conda|sh|bash|zsh)(?=[\s'\"]|$)|(?:^['\"]?|%s)\s*%s\./\S+"
+                 % (sep, launcher, sep, launcher), body):
         return "runs code (the skill never runs the target)"
     return None
 
