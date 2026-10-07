@@ -35,10 +35,10 @@ locally pinned vendor certificate in roots/. Intel and AMD roots are pinned
 manifests). NVIDIA's Device Identity CA is pinned too, matched against the
 SHA-256 fingerprint NVIDIA publishes for it -- see roots/PROVENANCE.md for
 how that copy was obtained and why a fingerprint match is what makes it a
-trust anchor rather than a self-referential one. Any vendor whose root is
-absent still returns `valid: null` with reason `trust_anchor_unavailable`:
-chain and signature are checked and reported, but nothing anchors them, and
-that is stated rather than glossed.
+trust anchor rather than a self-referential one. A vendor without usable pins
+returns `valid: null` with reason `trust_anchor_unavailable`.
+A chain ending at a certificate different from every bundled vendor pin fails
+verification. AMD pins cover ARK-Milan and ARK-Genoa.
 
     uv run eqty-manifest/verify_attestation.py <manifest.json>
     uv run eqty-manifest/verify_attestation.py <manifest.json> <statement_id>
@@ -64,9 +64,10 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOTS_DIR = os.path.join(SCRIPT_DIR, "roots")
 
 PINNED_ROOTS = {
-    "intel": "intel-sgx-root-ca.pem",
-    "amd": "amd-milan-ark-ask.pem",
-    "nvidia": "nvidia-device-identity-ca.pem",
+    "intel": ("intel-sgx-root-ca.pem",),
+    "amd": ("amd-milan-ark-ask.pem", "amd-genoa-ark.pem",
+            "amd-turin-ark.pem", "amd-venice-ark.pem"),
+    "nvidia": ("nvidia-device-identity-ca.pem",),
 }
 
 PEM_RE = re.compile(rb"-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----", re.S)
@@ -92,10 +93,14 @@ def _certs(data: bytes):
 
 
 def _load_pinned(name):
-    path = os.path.join(ROOTS_DIR, PINNED_ROOTS[name])
-    if not os.path.exists(path):
-        return []
-    return _certs(open(path, "rb").read())
+    """Load all bundled certificates for a vendor across product lines."""
+    pinned = []
+    for fname in PINNED_ROOTS[name]:
+        path = os.path.join(ROOTS_DIR, fname)
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                pinned.extend(_certs(f.read()))
+    return pinned
 
 
 def _verify_cert_signature(child, parent):

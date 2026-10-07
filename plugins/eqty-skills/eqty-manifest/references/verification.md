@@ -355,11 +355,20 @@ are not bundled, so every result carries `measurements_checked: false`.
 Never collapse "authentic hardware" into "ran the right code" — the gap
 between them is exactly where a genuine-but-compromised machine sits.
 
-All three vendors are pinned, so all 9 evidence blobs in the development corpus
-verify. A vendor whose root is *not* pinned — an AMD product line other than
-Milan, say — returns `valid: null` / `trust_anchor_unavailable`: chain and
-signature are verified, but nothing anchors them. That is a real state, not
-a bug; see `roots/PROVENANCE.md` for coverage limits.
+All three vendors are pinned, including AMD ARK-Milan, ARK-Genoa, ARK-Turin
+and ARK-Venice. All 9
+evidence blobs in the original development corpus verify; the Genoa regression
+fixture also verifies its SNP report and the TPM quote bound through it.
+Turin and Venice pins are tested with their official AMD signing certificates;
+Turin also has a genuine VCEK certificate fixture. No genuine Turin or Venice
+SNP report is in the regression corpus yet, so their end-to-end hardware report
+verification has not been validated here. Adding a root does not bypass the
+report signature check or add support for a different report signature format. An
+internally consistent chain whose terminal certificate does not match a bundled
+pin returns `valid: false` / `verification_failed`. If no usable pins are
+available for that vendor, trust stays `valid: null` / `trust_anchor_unavailable`.
+An incomplete chain is also unchecked. See `roots/PROVENANCE.md` for coverage
+limits and sources.
 
 `parse_manifest.py attestation` runs this automatically when `cryptography`
 is installed and reports it under `evidence_verification`; when the

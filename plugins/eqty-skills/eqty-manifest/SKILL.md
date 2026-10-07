@@ -1,6 +1,7 @@
 ---
 name: eqty-manifest
-description: Use this for any EQTY lineage manifest — a JSON file (often named *manifest*.json) with top-level "version", "contexts", "statements" and "blobs" keys, "urn:cid:" identifiers, did:key DIDs, or types like ComputationRegistration or CredentialRegistration. Trigger on "check this manifest", "was it tampered with", "does it verify", "who signed it", "what hardware did it run on", "what does this manifest show", "what happened in this run", "summarize this trace", or any request to report on, chart or make such a file readable, even if the user does not name the format. If you open a JSON file and find these keys or urn:cid: identifiers, stop and load this skill before going further. Load it BEFORE answering: never judge tampering or verification by reading the raw JSON yourself. Statement order and timestamps are not evidence; only this skill's scripts check the signatures and content hashes.
+description: >-
+  Use this for any EQTY lineage manifest — a JSON file (often named *manifest*.json) with top-level "version", "contexts", "statements" and "blobs" keys, "urn:cid:" identifiers, did:key DIDs, or types like ComputationRegistration or CredentialRegistration. Trigger on "check this manifest", "was it tampered with", "does it verify", "who signed it", "what hardware did it run on", "what does this manifest show", "what happened in this run", "summarize this trace", or any request to report on, chart or make such a file readable, even if the user does not name the format. If you open a JSON file and find these keys or urn:cid: identifiers, stop and load this skill before going further. Load it BEFORE answering: never judge tampering or verification by reading the raw JSON yourself. Statement order and timestamps are not evidence; only this skill's scripts check the signatures and content hashes.
 ---
 
 # EQTY Lineage Manifest
@@ -308,6 +309,11 @@ parsing.**
 > `parse_manifest.py` already implements CID-stripping, base64 decoding, and
 > the subject→metadata / data→registration lookups
 > (`references/manifest-format.md`).
+
+AMD SEV-SNP trust anchors include ARK-Milan, ARK-Genoa, ARK-Turin and ARK-Venice.
+The check uses the certificate fingerprint, not the CPU name;
+chain signatures and the report signature must also verify. Sources and exact
+coverage are recorded in `roots/PROVENANCE.md`.
 
 ```bash
 # Quick orientation: statement counts, signers, time range, integrity

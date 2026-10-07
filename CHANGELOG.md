@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.8 — 2026-10-07
+
+- **eqty-manifest** — AMD SEV-SNP trust anchors now include ARK-Genoa,
+  ARK-Turin and ARK-Venice as well as ARK-Milan. The new roots are pinned
+  from AMD's KDS with their sources
+  and checksums recorded. Reports and certificate chains must still pass their
+  signature checks and match a bundled vendor pin. TPM quotes bound through a
+  verified Genoa report can also establish their hardware and DID bindings.
+  Turin and Venice certificate trust paths have offline regression tests;
+  genuine SNP reports from those generations are not yet in the test corpus.
+
 ## 0.2.7 — 2026-10-06
 
 - **eqty-instrument** — the CFG agent audit catches more ways of running code.
