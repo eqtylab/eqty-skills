@@ -90,6 +90,11 @@ def _cid_hasher():
 
 COLLECTION_MAGIC = "CollectionV0."
 DIGEST_LEN = 32  # BLAKE3 digest size used by iroh
+# multicodec "blake3-hashseq": a CID with this codec names a blob that IS a list
+# of BLAKE3 digests (an iroh collection), so its entries need no guessing.
+HASHSEQ_CODEC = 0x80
+# CIDv1, raw codec, BLAKE3-256, 32-byte digest: how a plain file's blob is keyed.
+RAW_CID_PREFIX = bytes([0x01, 0x55, 0x1E, 0x20])
 
 
 def _collect_cids(obj, into):
@@ -139,13 +144,12 @@ def read_varint(buf: bytes, i: int):
     return result, i
 
 
-def cid_digest(key: str):
-    """Best-effort extraction of the raw hash digest bytes from a
-    multibase-base32 CIDv1 blob key (e.g. 'bafkr4i...', 'baga6yaq...').
-    These keys are multibase 'b' (base32, lowercase, no padding) encodings
-    of: cid-version varint, codec varint, multihash-code varint,
-    multihash-length varint, then the digest bytes. Returns None if the
-    key doesn't decode as expected (e.g. it isn't multibase-base32 CID —
+def _cid_parts(key: str):
+    """(codec, digest) of a multibase-base32 CIDv1 blob key (e.g. 'bafkr4i...',
+    'baga6yaq...'). These keys are multibase 'b' (base32, lowercase, no
+    padding) encodings of: cid-version varint, codec varint, multihash-code
+    varint, multihash-length varint, then the digest bytes. Returns None if
+    the key doesn't decode as expected (e.g. it isn't multibase-base32 CID —
     a did:key or statement id passed in here should just fail gracefully)."""
     try:
         if not key or key[0] != "b":
@@ -155,12 +159,31 @@ def cid_digest(key: str):
         raw = base64.b32decode(body)
         i = 0
         _version, i = read_varint(raw, i)
-        _codec, i = read_varint(raw, i)
+        codec, i = read_varint(raw, i)
         _mh_code, i = read_varint(raw, i)
         mh_len, i = read_varint(raw, i)
-        return raw[i : i + mh_len]
+        return codec, raw[i : i + mh_len]
     except Exception:
         return None
+
+
+def cid_digest(key: str):
+    """Best-effort extraction of the raw hash digest bytes from a blob key,
+    or None (see _cid_parts)."""
+    parts = _cid_parts(key)
+    return parts[1] if parts else None
+
+
+def cid_codec(key: str):
+    """The multicodec of a blob key, or None (see _cid_parts)."""
+    parts = _cid_parts(key)
+    return parts[0] if parts else None
+
+
+def raw_cid_key(digest: bytes) -> str:
+    """The blob key of a plain file whose BLAKE3 digest is `digest`. A hash-seq
+    entry is only a digest, so this is how an entry with no blob is named."""
+    return "b" + base64.b32encode(RAW_CID_PREFIX + digest).decode().lower().rstrip("=")
 
 
 def try_parse_iroh_collection(raw: bytes):
@@ -226,6 +249,8 @@ def decode_blob(b64: str):
 
 def describe(decoded: dict, n=200) -> str:
     """One-line human-readable summary of any resolve()/decode_blob() result."""
+    if decoded is None:
+        return "[missing — not embedded]"
     kind = decoded["kind"]
     if kind == "invalid_base64":
         return f"[INVALID BASE64 — possibly corrupt or tampered: {decoded['error']}]"
@@ -354,23 +379,37 @@ class Manifest:
 
     # ---- HashSeq / collection resolution --------------------------------
     def try_resolve_hashseq(self, key: str):
-        """If the blob at `key` is exactly a concatenation of 32-byte
-        chunks that ALL match some other blob's own digest, return the
-        ordered list of matched keys. Otherwise return None. Requires
-        every chunk to resolve — a partial match is far more likely to be
-        coincidental opaque binary than a real (partially corrupt)
-        HashSeq, since digest collisions are effectively impossible."""
+        """The ordered entry keys of the HashSeq blob at `key`, or None if it
+        is not one.
+
+        A key whose CID codec is blake3-hashseq (0x80) is a HashSeq by
+        declaration, so every 32-byte chunk is an entry whether or not its
+        blob is embedded. An entry with no blob is a missing pre-image, named
+        by the raw-codec CID of its digest (`raw_cid_key`). Requiring every
+        chunk to match here skipped a model collection whole whenever its
+        weights were left out: its names blob was then reported orphaned and
+        its files were never reported missing.
+
+        Any other key is a HashSeq only if EVERY chunk matches an embedded
+        blob's digest. Without the codec to say so, a partial match is far
+        more likely to be coincidental opaque binary than a real HashSeq."""
         raw = self.raw_bytes(key)
-        if not raw or len(raw) == 0 or len(raw) % DIGEST_LEN != 0:
+        if not raw or len(raw) % DIGEST_LEN != 0:
             return None
         chunks = [raw[i : i + DIGEST_LEN] for i in range(0, len(raw), DIGEST_LEN)]
-        keys = []
-        for c in chunks:
-            k = self.digest_to_key.get(c)
-            if k is None:
-                return None
-            keys.append(k)
-        return keys
+        if cid_codec(key) == HASHSEQ_CODEC:
+            return [self.digest_to_key.get(c) or raw_cid_key(c) for c in chunks]
+        keys = [self.digest_to_key.get(c) for c in chunks]
+        return None if None in keys else keys
+
+    def collection_names(self, keys):
+        """{entry index: file name} for a HashSeq whose entry 0 is an embedded
+        CollectionV0 names blob listing one name per remaining entry; {}
+        otherwise."""
+        names = self.decoded(keys[0])
+        if names and names["kind"] == "iroh_collection" and len(names["files"]) == len(keys) - 1:
+            return dict(enumerate(names["files"], start=1))
+        return {}
 
     def resolve(self, cid: str, _depth=0):
         """The main entry point for reading a blob's content. Like
@@ -390,6 +429,8 @@ class Manifest:
           (the latter is used when chunk 0 doesn't look like a names
           listing with a matching count — still fully resolved, just
           without inferred filenames)
+        A file or entry whose blob is not embedded has `content` None: a
+        missing pre-image (see `collection_entries`).
         """
         key = strip_urn(cid)
         if key not in self.blobs:
@@ -402,11 +443,11 @@ class Manifest:
         if keys is None:
             return flat  # genuinely opaque binary, not a resolvable HashSeq
 
-        first_flat = decode_blob(self.blobs[keys[0]])
-        if first_flat["kind"] == "iroh_collection" and len(first_flat["files"]) == len(keys) - 1:
+        names = self.collection_names(keys)
+        if names:
             files = [
-                {"name": name, "cid": k, "content": self.resolve(k, _depth + 1)}
-                for name, k in zip(first_flat["files"], keys[1:])
+                {"name": names[i], "cid": k, "content": self.resolve(k, _depth + 1)}
+                for i, k in enumerate(keys[1:], start=1)
             ]
             return {"kind": "iroh_collection_resolved", "meta_cid": keys[0], "files": files}
 
@@ -528,6 +569,14 @@ class Manifest:
                 _collect_cids(subj["identity"], referenced)
             if isinstance(s.get("vcomp"), (dict, list)):
                 _collect_cids(s["vcomp"], referenced)
+
+            # StorageRegistration.storedOn names where `data` is kept, as a
+            # location blob ({"scheme", "uri", "host"}). The SDK types it as any
+            # string, so it counts only when it is a CID: a DID or URL there
+            # is not a blob, and must not be reported as a missing one.
+            on = s.get("storedOn")
+            if isinstance(on, str) and on.startswith("urn:cid:"):
+                referenced.add(strip_urn(on))
         return referenced
 
     def referenced_cids(self):
@@ -546,6 +595,27 @@ class Manifest:
                     pass
         return referenced
 
+    def _hashseq_walk(self):
+        """(reachable blob keys, collection entries): the walk behind
+        `reachable_blob_closure` and `collection_entries`."""
+        reachable = set(k for k in self.referenced_cids() if k in self.blobs)
+        entries = {}
+        frontier = set(reachable)
+        while frontier:
+            next_frontier = set()
+            for key in sorted(frontier):
+                keys = self.try_resolve_hashseq(key)
+                if not keys:
+                    continue
+                names = self.collection_names(keys)
+                for i, k in enumerate(keys):
+                    entries.setdefault(k, []).append({"collection": key, "name": names.get(i)})
+                    if k in self.blobs and k not in reachable:
+                        reachable.add(k)
+                        next_frontier.add(k)
+            frontier = next_frontier
+        return reachable, entries
+
     def reachable_blob_closure(self):
         """Every blob key reachable starting from `referenced_cids()` and
         expanding through HashSeq resolution (a blob referenced by a
@@ -555,20 +625,41 @@ class Manifest:
         whether a blob is truly unused, because a blob can be fully
         load-bearing while being invisible to every statement field: it's
         only reachable by decoding another blob's raw bytes."""
-        seen = set()
-        frontier = set(k for k in self.referenced_cids() if k in self.blobs)
-        seen |= frontier
-        while frontier:
-            next_frontier = set()
-            for key in frontier:
-                keys = self.try_resolve_hashseq(key)
-                if keys:
-                    for k in keys:
-                        if k not in seen:
-                            seen.add(k)
-                            next_frontier.add(k)
-            frontier = next_frontier
-        return seen
+        return self._hashseq_walk()[0]
+
+    def collection_entries(self):
+        """{entry key: [{"collection": <HashSeq key>, "name": <file name or
+        None>}, ...]} for every entry of every HashSeq reachable from a
+        statement, embedded or not. A key lists every place it appears: the
+        same file in two collections (a tokenizer shipped with a base model
+        and its adapter) is one CID. An entry absent from `blobs` is a missing
+        pre-image exactly as an absent `data` CID is: the collection commits
+        to that file, and the manifest does not carry it."""
+        return self._hashseq_walk()[1]
+
+    def missing_collection_entries(self):
+        """`collection_entries()` restricted to entries with no blob."""
+        return {k: v for k, v in self.collection_entries().items() if k not in self.blobs}
+
+    def absent_declaration(self, key: str, entries=None):
+        """The by-reference declaration covering an absent CID: its own, or
+        that of a collection it is a file of (a model directory declared by
+        reference leaves out every file in it). None if none declares it."""
+        declared = self.by_reference_declaration(key)
+        if declared:
+            return declared
+        for e in (entries if entries is not None else self.collection_entries()).get(key, []):
+            declared = self.by_reference_declaration(e["collection"])
+            if declared:
+                return declared
+        return None
+
+    @staticmethod
+    def describe_entry(places):
+        """'file "<name>" of iroh collection <key>' for each place an entry
+        appears, for problem details."""
+        return "; ".join("%s of iroh collection %s" % ('file "%s"' % e["name"] if e["name"] else "an entry",
+                                                       e["collection"]) for e in places)
 
     def orphaned_blobs(self):
         """Blobs that exist in the manifest's `blobs` map but are
@@ -607,23 +698,30 @@ class Manifest:
         treat 'unavailable' as UNKNOWN, never as clean.
 
         `missing` lists CIDs a statement references but `blobs` does not
-        hold, and `total` counts present + missing. Without it the counts
+        hold, plus the files of a reachable iroh collection that `blobs` does
+        not hold (see `collection_entries`), and `total` counts present + missing. Without it the counts
         only cover blobs that happen to be in the file: deleting a blob
         shrinks the denominator with it, so N of M would read as N/N.
+
+        `missing_names` maps each missing collection file to its file name(s),
+        so a report can say which file is absent, not just which hash.
 
         `by_reference` maps the absent CIDs the signer declared as committed
         by CID only (see `by_reference_declaration`) to that declaration.
         They are not in `missing` and not a gap in the record, but they are
         still unverifiable here, and `total` still counts them."""
-        absent = sorted(c for c in self.content_referenced_cids() if c not in self.blobs)
-        by_reference = {c: d for c in absent for d in [self.by_reference_declaration(c)] if d}
+        entries = self.missing_collection_entries()
+        absent = sorted({c for c in self.content_referenced_cids() if c not in self.blobs} | set(entries))
+        by_reference = {c: d for c in absent for d in [self.absent_declaration(c, entries)] if d}
         missing = [c for c in absent if c not in by_reference]
+        missing_names = {c: sorted({e["name"] for e in entries[c] if e["name"]})
+                         for c in missing if c in entries}
         total = len(self.blobs) + len(absent)
         hasher = _cid_hasher()
         if hasher is None:
             return {"status": "unavailable", "matched": 0, "mismatched": [],
                     "unverifiable": len(self.blobs), "missing": missing,
-                    "by_reference": by_reference, "total": total,
+                    "by_reference": by_reference, "missing_names": missing_names, "total": total,
                     "detail": "eqty_sdk not installed; run the script with `uv run`, or: pip install -r requirements.txt"}
         matched, mismatched, unverifiable, invalid_base64 = 0, [], 0, []
         for key, b64 in self.blobs.items():
@@ -645,7 +743,7 @@ class Manifest:
         return {"status": "verified", "matched": matched,
                 "mismatched": mismatched, "unverifiable": unverifiable,
                 "invalid_base64": invalid_base64, "missing": missing,
-                "by_reference": by_reference, "total": total}
+                "by_reference": by_reference, "missing_names": missing_names, "total": total}
 
     def integrity_check(self):
         """Flag anything that looks structurally wrong: invalid base64,
@@ -663,18 +761,21 @@ class Manifest:
             if d["kind"] == "invalid_base64":
                 problems.append({"cid": cid_key, "issue": "invalid_base64", "detail": d["error"]})
 
+        entries = self.missing_collection_entries()
         referenced = self.content_referenced_cids()
-        for cid_key in referenced:
+        for cid_key in sorted(referenced | set(entries)):
             if cid_key not in self.blobs:
-                declared = self.by_reference_declaration(cid_key)
+                where = ("referenced by a statement" if cid_key in referenced
+                         else self.describe_entry(entries[cid_key]))
+                declared = self.absent_declaration(cid_key, entries)
                 if declared:
                     problems.append({"cid": cid_key, "issue": "by_reference",
-                                     "detail": "declared by the signer as committed by CID only (%s); "
+                                     "detail": "%s; declared by the signer as committed by CID only (%s); "
                                                "its bytes are not embedded, so they cannot be checked here"
-                                               % (declared.get("reason") or "no reason given")})
+                                               % (where, declared.get("reason") or "no reason given")})
                 else:
                     problems.append({"cid": cid_key, "issue": "missing_blob",
-                                     "detail": "referenced by a statement but no blob present"})
+                                     "detail": "%s but no blob present" % where})
 
         # Content-address verification. A mismatch here means the payload was
         # altered after the manifest was built — the single most important
@@ -925,14 +1026,17 @@ class Manifest:
         Covers this blob's own bytes only: content resolved through it (a
         collection's files) has its own CIDs and its own status."""
         if key not in self.blobs:
-            if key in self.content_referenced_cids():
-                declared = self.by_reference_declaration(key)
+            entries = self.missing_collection_entries()
+            if key in self.content_referenced_cids() or key in entries:
+                declared = self.absent_declaration(key, entries)
                 if declared:
                     return {"status": "by_reference", "declaration": declared,
                             "detail": "declared by the signer as committed by CID only; not embedded, "
                                       "so its content cannot be checked without the original file"}
+                where = ("referenced by a statement" if key not in entries
+                         else self.describe_entry(entries[key]))
                 return {"status": "missing",
-                        "detail": "referenced by a statement but not embedded; its content cannot be checked"}
+                        "detail": "%s but not embedded; its content cannot be checked" % where}
             return None
         raw = self.raw_bytes(key)
         if raw is None:

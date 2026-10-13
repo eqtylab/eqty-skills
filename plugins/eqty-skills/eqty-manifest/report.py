@@ -933,12 +933,13 @@ def _verification_html(v, pills=None):
           % (c["total"], attached, c["matched"], attached))
         a(_hash_bar(c))
         urn = lambda xs: ["urn:cid:" + x for x in xs]
-        for title, xs in [("Tampering detected", c["mismatched"]),
-                          ("Pre-image not valid base64", c.get("invalid_base64") or []),
-                          ("Missing pre-image blobs", c["missing"])]:
+        for title, xs, ids in [("Tampering detected", c["mismatched"], urn(c["mismatched"])),
+                               ("Pre-image not valid base64", c.get("invalid_base64") or [],
+                                urn(c.get("invalid_base64") or [])),
+                               ("Missing pre-image blobs", c["missing"], SM.missing_lines(c))]:
             if xs:
                 a('<p class="issue"><strong>%s</strong> · %d</p>' % (E(title), len(xs)))
-                a(_ids_html(urn(xs)))
+                a(_ids_html(ids))
         br = c.get("by_reference") or {}
         if br:
             a('<p class="issue"><strong>By reference</strong> · %d — %s</p>' % (len(br), E(SM.BY_REFERENCE_NOTE)))

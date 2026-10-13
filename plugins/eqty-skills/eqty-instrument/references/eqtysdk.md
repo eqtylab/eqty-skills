@@ -259,6 +259,84 @@ to `config.toml` in the SDK directory and so persist across runs. [Source: confi
 collection byte layout as an implementation detail rather than maintaining a second
 handwritten encoder based on one observed fixture.
 
+**Defaults, and the symlink trap.** A fresh SDK directory writes
+`include_hidden_files = false`, `gitignore = false`, `include_symlinks = false`.
+Checked with `eqty_sdk` 2.4.1 and 2.4.2 (2026-10-08), directory hashing with
+those defaults:
+
+- skips hidden paths: editing `.cache/huggingface/download/*.metadata` inside a
+  model folder leaves the CID unchanged;
+- skips symlinks: **a Hugging Face cache snapshot
+  (`~/.cache/huggingface/hub/models--*/snapshots/<commit>/`) is all symlinks into
+  `blobs/`, so it hashes to the same CID as an empty directory.** The weights are
+  not in it, and nothing raises;
+- hashes `.gitignore`d files, since `gitignore` is off.
+
+A single symlinked *file* is different: `from_path` follows it and gets the
+target's bytes CID. Before hashing a directory, check whether it holds symlinks;
+if it does, set the rules for that call and record them on the asset:
+
+```python
+cfg.set_cid_ignore_rules(include_hidden_files=False, gitignore=False,
+                         include_symlinks=True)   # all three: omitted ones reset (above)
+Model.from_path(snapshot_dir, name="Qwen2.5-0.5B @ <commit>", _store=False,
+                storage="by-reference", obtain_from="hf:Qwen/Qwen2.5-0.5B@<commit>",
+                cid_ignore="hidden=false gitignore=false symlinks=true")
+```
+
+The rules persist in `config.toml`, so the consumer that re-hashes the same
+directory gets the same CID — and any later directory hash in that SDK
+directory follows symlinks too. With symlinks included, editing a target in
+`blobs/` changes the CID, as it should.
+
+### 3.8 When a directory is one asset
+
+Hash a directory as **one collection** only when all three hold:
+
+1. **The code loads it by one directory path**: `from_pretrained(dir)`,
+   `PeftModel.from_pretrained(base, dir)`, `load_from_disk(dir)`,
+   `trainer.train(resume_from_checkpoint=dir)`, a NeMo/Megatron
+   `load_checkpoint(dir)`.
+2. **No step reads one of its files on its own.** If a later step opens only
+   `config.json`, or only one split, the edge to that file is lost inside the
+   collection.
+3. **It is finished.** Hash it after the last write: after `save_pretrained`
+   returns, after the checkpoint callback, not while the run still appends.
+
+Otherwise hash files one by one. **Per-file is the default; a collection needs
+the three conditions.**
+
+| Definitely one collection | Why |
+|---|---|
+| A model directory: `save_pretrained` output, an HF snapshot or `local_dir` download, sharded `*.safetensors` + `model.safetensors.index.json`, a NeMo/Megatron distributed checkpoint (`*.distcp` + `.metadata`) | Weights, config and tokenizer files are loaded together and mean nothing apart |
+| A training checkpoint, `checkpoint-<step>/` | Resume needs weights, optimizer, scheduler, RNG and trainer state together |
+| A PEFT/LoRA adapter directory | `adapter_model.safetensors` is unusable without `adapter_config.json` |
+| A `Dataset.save_to_disk` directory | `load_from_disk` reads the Arrow files with `dataset_info.json` and `state.json` |
+
+| Never one collection | Do instead |
+|---|---|
+| A single file, however large | `from_path(file)` |
+| A directory of separate items steps choose among: `train/`+`eval/` splits, a prompts folder, a document corpus queried per document | One asset per item a step reads, so each edge lands on what was used |
+| A directory still being written: logs, TensorBoard `events.out.*`, a run's output folder mid-run | Hash the finished files at the point they are read or emitted |
+| Caches and scratch: `.cache/`, `__pycache__`, temp dirs | Leave out; they hold timestamps and locks, not content |
+
+Anything else — a parquet shard folder, an image folder, a vector index, a code
+repository — is a collection only if it meets the three conditions; say which
+in the report.
+
+**Never walk a directory and register each file.** `for f in dir.rglob("*"):
+Model.from_path(f)` gives one node per file (Explorer shows them as a "Model
+group"), sweeps in hidden download bookkeeping such as
+`.cache/huggingface/download/*.metadata` that the directory hash would skip,
+labels tokenizer files as models, and leaves no single CID for the consumer to
+match. If a directory qualifies, one `from_path(dir)`; if it doesn't, register
+only the files steps actually read.
+
+**Same directory on both sides.** The producer registers
+`Model.from_path(dir, name=…)`; the consumer adds
+`get_cid_for_path(dir)` with the same ignore rules. A consumer that hashes one
+file inside the directory gets a different CID, and the edge does not form.
+
 ## 4. Storage and content availability
 
 Hashing, registering statements, retaining bytes, and exporting are separate actions.
@@ -641,8 +719,10 @@ Four rules. The first three make the edges form; the fourth keeps the code:
 | `hf-dataset` | `datasets.Dataset`, a split of a `DatasetDict` | `split.to_parquet(buf)` into an `io.BytesIO`, then `get_cid_for_bytes(buf.getvalue(), _store=True)`. It includes shuffles and selections, which `cache_files` does not. | stored; by reference once a split is too big to copy | ✓ same bytes in two processes |
 | `hf-dataset-source` | the dataset as `load_dataset` returned it | each `split.cache_files[i]["filename"]` via `Dataset.from_path`. These are the Arrow files the library built from the hub's parquet, so they are what the program read. | by reference, `obtain_from` the hub id | ✓ |
 | `peft-model` | `peft.PeftModel` | `safetensors.torch.save(get_peft_model_state_dict(model))`: the adapter weights only, KBs for LoRA. Hash it before and after training: they are different versions, so different assets. | stored | ✓ same bytes within a run; LoRA init is random, so not across runs |
-| `hf-base-weights` | a model from `from_pretrained` | `huggingface_hub.try_to_load_from_cache(repo, "model.safetensors", revision=model.config._commit_hash)` via `Model.from_path`. For a sharded model, each shard listed in `model.safetensors.index.json`. | by reference, `obtain_from` `repo@commit` | ✓ single file; shards not exercised |
-| `torch-module` | any other `torch.nn.Module` | `safetensors.torch.save(model.state_dict())` while it is small. For a large model, hash only the files it is saved to, and report the in-memory edges as gaps. Tied weights make `save()` refuse the shared tensors. | by reference when heavy | not exercised |
+| `hf-base-weights` | a model from `from_pretrained` | the directory it loaded, as one collection (§3.8): `huggingface_hub.snapshot_download(repo, revision=<the revision the code passed, else None>, local_files_only=True)` via `Model.from_path`; the commit for `obtain_from` is the returned folder's name. Not `model.config._commit_hash`: transformers 5 drops it (5.19.0 raises `AttributeError`). A cache snapshot is all symlinks: set `include_symlinks=True` first (§3.7), or it hashes as an empty directory. Never one node per shard or per file. | by reference, `obtain_from` `repo@commit` | ✓ 2026-10-08, eqty_sdk 2.4.2 + transformers 5.19: an 8-shard model saved with `save_pretrained`, laid out as a cache snapshot and as a `local_dir` download (layouts rebuilt by hand; the hub was unreachable) |
+| `model-dir` | a directory the code writes or loads whole: `save_pretrained(dir)`, `checkpoint-<step>/`, a PEFT adapter dir, a NeMo/Megatron checkpoint, a `local_dir` download | `Model.from_path(dir)` once, after the last write (§3.8). Hidden `.cache/` bookkeeping is skipped by default; symlinks are too (§3.7). For a `local_dir` download, record where it came from: the first line of any `.cache/huggingface/download/<file>.metadata` is the repo commit (then the etag, then the download time), so set `obtain_from="hf:<repo>@<commit>"`. Read it as provenance metadata; never hash the receipts. | by reference when heavy | ✓ directory behaviour; not on a real checkpoint |
+| `hf-dataset-on-disk` | `load_from_disk(dir)` / `save_to_disk(dir)` | `Dataset.from_path(dir)` once (§3.8) | stored, or by reference when heavy | not exercised |
+| `torch-module` | any other `torch.nn.Module` | `safetensors.torch.save(model.state_dict())` while it is small. For a large model, hash only what it is saved to — the directory, as one collection, when it is saved as one (§3.8) — and report the in-memory edges as gaps. Tied weights make `save()` refuse the shared tensors. | by reference when heavy | not exercised |
 | `hf-tokenizer` | `transformers` tokenizer | `tokenizer.backend_tokenizer.to_str().encode()` for a fast tokenizer. For a slow one, its files from the cache. | stored | ✓ same bytes in two processes |
 | `hf-trainer` | `transformers.Trainer` | **Nothing: it's a container, not data.** Record what it carries, each by its own recipe: `trainer.model`, `trainer.args`, the dataset. | — | ✓ |
 | `hf-training-args` | `TrainingArguments` | `Configuration.from_object(json.loads(args.to_json_string()), _store=True)`. Check it for secrets before storing: it holds paths and hub settings. | stored | ✓ |
@@ -1096,6 +1176,8 @@ This revision replaces application anecdotes as SDK authority. Major corrections
 | Tuples use the general serializer as input | They raise `TypeError`, as do `bytes`, `set`, and sync generators. |
 | (unstated) setup prerequisites | `init()` before signers; an active signer before any registration; `init()` is once per process. |
 | (unstated) metadata privacy | Metadata blobs are stored and exported regardless of `_store`. |
+| A model directory registered file by file | One `from_path(dir)` collection when §3.8's three conditions hold; never walk and register each file. |
+| A HF cache snapshot hashed with default rules | Symlinks are skipped, so it equals an empty directory: set `include_symlinks=True` (§3.7). |
 | (unstated) config persistence | `set_store_all_blobs` and ignore rules persist in `config.toml`; omitted ignore-rule arguments reset to defaults. |
 | Explicit operators are generally available | Only through the advanced statement API or a VComp notary; builder/decorator use the signer. |
 

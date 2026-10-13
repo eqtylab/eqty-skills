@@ -368,6 +368,12 @@ def _urn(cid):
     return cid if cid.startswith("urn:") else "urn:cid:" + cid
 
 
+def missing_lines(c):
+    """Each missing CID, followed by its file name when it is a file of an iroh collection."""
+    names = c.get("missing_names") or {}
+    return [_urn(x) + (" — " + ", ".join(names[x]) if names.get(x) else "") for x in c["missing"]]
+
+
 def _cap(lines, full, indent):
     shown = lines if full else lines[:LIMIT]
     out = [indent + l for l in shown]
@@ -472,7 +478,7 @@ def render_text(s, full=False):
         L += _by_reference_lines(c, full)
         if c["missing"]:
             L.append("- %d hash%s missing pre-image blobs" % (len(c["missing"]), " has" if len(c["missing"]) == 1 else "es have"))
-            L += _cap([_urn(x) for x in c["missing"]], full, "  - ")
+            L += _cap(missing_lines(c), full, "  - ")
         else:
             L.append("- No missing pre-image blobs")
 

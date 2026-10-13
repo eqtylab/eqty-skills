@@ -290,11 +290,20 @@ bytes are left out is otherwise indistinguishable from one that went missing:
 `_store=False` and three metadata keywords on the same call:
 
 ```python
-Model.from_path(ckpt_path, name="Checkpoint shard consolidated.00.pth", _store=False,
+Model.from_path(ckpt_dir, name="Llama 2 7B checkpoint", _store=False,   # the directory, once
                 storage="by-reference",
-                storage_reason="model weights; real shards are several GB and licensed",
+                storage_reason="model weights; real checkpoints are several GB and licensed",
                 obtain_from="Meta Llama 2 download (download.sh)")   # optional
 ```
+
+**A model is a directory, so hash the directory.** When the code loads a
+directory by one path (`from_pretrained(dir)`, a checkpoint, an adapter, a
+`save_to_disk` dataset) and no step reads one of its files alone, register it
+once with `from_path(dir)`: one node, one CID for the consumer to match.
+Never walk it and register each file. Everything else stays per-file. Before
+hashing, check for symlinks: an HF cache snapshot is all symlinks and, with
+the default ignore rules, hashes as an empty directory.
+`references/eqtysdk.md` §3.7–3.8 has the test and the fix.
 
 `storage="by-reference"` is the declaration; `storage_reason` says why, in
 words that stay true for whatever file the code loads (it is signed, and a stub

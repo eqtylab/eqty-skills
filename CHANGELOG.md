@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.2.9 — 2026-10-13
+
+- **eqty-instrument** — a model, checkpoint, adapter or `save_to_disk` dataset
+  directory is registered once as a collection (`from_path(dir)`), not as one
+  Model node per file. Per-file hashing gave one manifest a 12-node model group
+  and picked up Hugging Face download receipts. `eqtysdk.md` gains §3.8 on when
+  a directory is one asset, and the recipes now hash the HF snapshot directory
+  (`config._commit_hash` is gone in transformers 5). There are new `model-dir`
+  and `hf-dataset-on-disk` recipes.
+- **eqty-manifest** — iroh collections whose files are not all embedded are
+  now read. Before, such a collection was skipped: its names blob was reported
+  as an orphan and its files were never reported as missing. Each file with no
+  blob is now a missing pre-image, named by its file name in the summary and
+  the HTML report. A file shared by two collections counts once.
+  `StorageRegistration.storedOn` is followed when it is a CID, so storage
+  locations are no longer reported as orphans.
+
 ## 0.2.8 — 2026-10-07
 
 - **eqty-manifest** — AMD SEV-SNP trust anchors now include ARK-Genoa,

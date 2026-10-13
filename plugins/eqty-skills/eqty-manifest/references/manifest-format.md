@@ -89,6 +89,22 @@ Always call `resolve()` (or the `content`/`content_preview` wrappers built
 on it) rather than the flat single-blob `decoded()`/`decode_blob()` when
 you want the true content behind a CID.
 
+**A collection's files need not be embedded.** A model or dataset directory
+is usually committed as a collection whose names blob and HashSeq are
+embedded but whose files (weights, CSVs) are not. The HashSeq's own CID says
+what it is (codec `0x80`, `blake3-hashseq`; keys start `bagaachra`), so every
+chunk is an entry whether or not a blob matches it: a file with no blob is a
+**missing pre-image**, reported by `integrity_check()` and
+`content_integrity_check()` with its file name, and the names blob is part of
+the collection, not an orphan. One file can sit in two collections (a
+tokenizer shipped with both a base model and its adapter); it is one CID and
+counts once. A binary blob *without* that codec is drilled into only if every
+chunk matches an embedded blob.
+
+`StorageRegistration.storedOn` is another blob reference: the location where
+`data` is kept, as a `{"scheme", "uri", "host"}` blob. It counts only when it
+is a CID.
+
 One practical payoff: this resolution can also tell you *which named file*
 is corrupted. In one real manifest, a HashSeq's second chunk pointed at a
 blob that failed to base64-decode at all — meaning it wasn't just "some
