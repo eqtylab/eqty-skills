@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.10 — 2026-10-20
+
+- **eqty-instrument** — the Mode 1 handler packages are on public PyPI:
+  `eqty-lineage-langchain` from 0.2.5 and `eqty-lineage-deepagents` from 0.2.1.
+  A patch now adds the handler to the repo's dependency file with that lower bound,
+  next to `eqty_sdk==<version>`, and the Mode 1 review checklist checks both lines.
+  Before, the skill said the handlers came only from EQTY's private index and gave
+  no rule for their line, so a patch could add a bare name that failed to install
+  outside EQTY. The matching limitation is gone from `LIMITATIONS.md`.
+
 ## 0.2.9 — 2026-10-13
 
 - **eqty-instrument** — a model, checkpoint, adapter or `save_to_disk` dataset

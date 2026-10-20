@@ -126,9 +126,11 @@ writes — runners, stubs, fixtures — is ever instrumented.**
 nothing then looks exactly like a run that worked. Add
 `eqty_sdk==<version>` to the target repo's dependency file as part of the patch.
 Full rules, with the failure each one prevents, in `references/eqtysdk.md` §13.1. The SDK is
-open source: [`eqtylab/integrity-py`](https://github.com/eqtylab/integrity-py). (Mode 1's
-*handler* packages are a separate matter — those still resolve through EQTY's
-private index.)
+open source: [`eqtylab/integrity-py`](https://github.com/eqtylab/integrity-py). Mode 1's
+handler is public too: add `eqty-lineage-langchain>=0.2.5` or
+`eqty-lineage-deepagents>=0.2.1` beside it, whichever the patch imports. Those are
+the first versions on public PyPI; older ones exist only on EQTY's private index,
+so never pin below them.
 
 ```python
 import os

@@ -519,6 +519,11 @@ caught by "it ran", so they have to be caught by reading the diff.
 - [ ] **`init()` scope.** Is it called exactly once at startup, and not per run?
       A second call is a silent no-op, so a per-run `init()` gives every run the
       first run's store while looking like it does the opposite.
+- [ ] **Dependencies.** The repo's dependency file declares `eqty_sdk==<version>`
+      and the handler the patch imports, `eqty-lineage-langchain>=0.2.5` or
+      `eqty-lineage-deepagents>=0.2.1`. Those are the first versions on public PyPI;
+      a pin below them (say `==0.2.4`) exists only on EQTY's private index and fails
+      to install outside EQTY.
 - [ ] **Shell writes.** If `execute` is in the belt (sandbox or local-shell
       backend), the patch notes must say so: a shell can write files without
       naming a path, a successful `execute` drops the reconstruction caches, and

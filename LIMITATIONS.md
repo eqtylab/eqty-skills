@@ -5,9 +5,8 @@ What each skill cannot do today, so a result is never read as more than it is.
 ## eqty-instrument, Mode 1
 
 Limits of the framework handlers themselves, which the skill cannot work around.
-Items 1 and 3–6 are documented by `eqty-lineage`, whose docs are vendored in
-`plugins/eqty-skills/eqty-instrument/references/upstream/`; item 2 is how its packages are
-distributed today.
+All of them are documented by `eqty-lineage`, whose docs are vendored in
+`plugins/eqty-skills/eqty-instrument/references/upstream/`.
 
 1. **Your agent needs an in-process call site.** A callback handler attaches to
    a Python call such as `.invoke()`. An agent that only runs in a
@@ -16,27 +15,23 @@ distributed today.
    handler to; recording it would need a hook the runtime exposes. `detect.py`
    refuses such a repo with a non-zero exit rather than producing an empty plan.
    (`plugins/eqty-skills/eqty-instrument/references/upstream/eqty-lineage-deepagents.EXAMPLES.md:205`)
-2. **The handler packages come from EQTY's private index.** `eqty-sdk` is on
-   public PyPI, but `eqty-lineage-langchain` and `eqty-lineage-deepagents`
-   resolve only through `pypi.eqtylab.io`. Your CI and teammates need access to
-   it.
-3. **Compaction is recorded as an ordinary step.** On long DeepAgents runs,
+2. **Compaction is recorded as an ordinary step.** On long DeepAgents runs,
    `SummarizationMiddleware` compacts the conversation. The manifest shows that a
    compaction happened, on which turn, and what survived it — but it is recorded
    as an ordinary derivation, so its edges cannot say that most of the input was
    discarded. Anyone auditing the manifest should know this.
    (`plugins/eqty-skills/eqty-instrument/references/upstream/eqty-lineage-deepagents.README.md:223`)
-4. **Shell commands leave gaps.** Under a sandbox or local-shell backend, whatever
+3. **Shell commands leave gaps.** Under a sandbox or local-shell backend, whatever
    an `execute` call did to files cannot be recovered from the command, so it is
    not recorded. Rather than assert files it may have changed, later edits and
    reads stop linking to earlier versions.
    (`plugins/eqty-skills/eqty-instrument/references/upstream/eqty-lineage-deepagents.README.md:158`)
-5. **Files the agent only reads are recorded as renderings, not as the file.**
+4. **Files the agent only reads are recorded as renderings, not as the file.**
    Under a filesystem, store or sandbox backend, a file that already existed and
    is only read is recorded as what `read_file` returned — line-numbered, chunked
    at long lines and truncated when large — labelled as a rendering, not under
    the file's own content hash. (`plugins/eqty-skills/eqty-instrument/references/upstream/eqty-lineage-deepagents.README.md:141`)
-6. **Tool source capture needs real files.** `@eqty_tool` reads a tool's source
+5. **Tool source capture needs real files.** `@eqty_tool` reads a tool's source
    with `inspect.getsource`, so tools defined in a REPL or in `exec`'d code fall
    back to a name-and-description stub.
    (`plugins/eqty-skills/eqty-instrument/references/upstream/eqty-lineage-langchain.README.md:111`)

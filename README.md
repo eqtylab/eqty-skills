@@ -84,8 +84,8 @@ and is never installed.
   (`detect.py`, `check_graph.py`) use the standard library only. What it
   produces is a patch to *your* code, and that patch adds `eqty-sdk` to your
   project's dependencies, because the instrumented code imports it. In Mode 1
-  the patch also adds EQTY's LangChain or DeepAgents handler package, installed
-  from EQTY's private package index (see [`LIMITATIONS.md`](LIMITATIONS.md)).
+  the patch also adds EQTY's LangChain or DeepAgents handler package
+  (`eqty-lineage-langchain` or `eqty-lineage-deepagents`), also on public PyPI.
 
 Both skills build on the open-source EQTY SDK (`eqty_sdk`):
 [eqtylab/integrity-py](https://github.com/eqtylab/integrity-py), installed with
