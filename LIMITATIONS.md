@@ -51,6 +51,13 @@ All of them are documented by `eqty-lineage`, whose docs are vendored in
   your usage.
 - A fuller Mode 2 list is still being written.
 
+## eqty-explorer
+
+- **It needs a browser.** `serve` opens the lineage graph in your default browser.
+- **It loads the explorer's code from jsDelivr** (`@eqtylab/explorer`, pinned by
+  version and hash), so the first page load needs network access to
+  `cdn.jsdelivr.net`.
+
 ## eqty-manifest
 
 Every check the skill cannot run is reported as *not checked* — never as a pass.

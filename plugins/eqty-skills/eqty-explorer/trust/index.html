@@ -1,0 +1,98 @@
+<!doctype html>
+<!-- No data-equality-theme here: Equality's initializer (injected by
+     vite.config.ts) sets it from the stored choice, else the OS preference. -->
+<html lang="en">
+  <head>
+    <script id="equality-theme-init">
+    (() => {
+      const STORAGE_KEY = "equality-theme";
+      const UPDATE_EVENT = "equality-theme-change";
+      const applyThemeToDom = (theme) => {
+  const themeProviderRootElement = document.querySelector("[data-equality-theme]") || document.documentElement;
+  if (themeProviderRootElement) {
+    themeProviderRootElement.setAttribute("data-equality-theme", theme);
+  }
+};
+const getCurrentThemeState = (options = {}) => {
+  const { canFallbackToBrowserSettings = false } = options;
+  if (typeof window === "undefined") {
+    return void 0;
+  }
+  const isUsingLocalStorage = window.__equalityIsUsingLocalStorage;
+  const storedTheme = isUsingLocalStorage ? getThemeFromLocalStorage() : getThemeFromWindow();
+  const theme = storedTheme || getDefaultTheme() || getFallbackTheme({ canFallbackToBrowserSettings });
+  if (!storedTheme) {
+    setTheme(theme);
+  }
+  return theme;
+};
+const getDefaultTheme = () => {
+  const themeProviderRootElement = document.querySelector("[data-equality-theme]") || document.documentElement;
+  if (themeProviderRootElement) {
+    return themeProviderRootElement.getAttribute("data-equality-theme") || void 0;
+  } else {
+    return void 0;
+  }
+};
+const getFallbackTheme = (options = {}) => {
+  const { canFallbackToBrowserSettings = false } = options;
+  if (typeof window === "undefined" || !canFallbackToBrowserSettings) {
+    return FALLBACK_THEME;
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+};
+const getThemeFromLocalStorage = () => {
+  const safeReadStorage = (key) => {
+    try {
+      return window.localStorage.getItem(key);
+    } catch {
+      return null;
+    }
+  };
+  const themeLocalStorageValue = safeReadStorage(STORAGE_KEY);
+  return themeLocalStorageValue;
+};
+const getThemeFromWindow = () => {
+  return window.__equalityTheme;
+};
+const initializeTheme = (options = {}) => {
+  const { shouldStoreTheme = false } = options;
+  window.__equalityIsUsingLocalStorage = shouldStoreTheme;
+  const theme = getCurrentThemeState({ canFallbackToBrowserSettings: true });
+  if (theme) applyThemeToDom(theme);
+};
+const setTheme = (theme) => {
+  const isUsingLocalStorage = window.__equalityIsUsingLocalStorage;
+  if (isUsingLocalStorage) {
+    setThemeInLocalStorage(theme);
+  } else {
+    setThemeOnWindow(theme);
+  }
+  applyThemeToDom(theme);
+};
+const setThemeInLocalStorage = (theme) => {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, theme);
+    window.dispatchEvent(new CustomEvent(UPDATE_EVENT, { detail: theme }));
+  } catch {
+    console.error("Failed to set theme in localStorage");
+  }
+};
+const setThemeOnWindow = (theme) => {
+  window.__equalityTheme = theme;
+  window.dispatchEvent(new CustomEvent(UPDATE_EVENT, { detail: theme }));
+};
+      initializeTheme({ shouldStoreTheme: true });
+    })();
+  </script>
+
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Chain of Trust Visualizer</title>
+    <script type="module" crossorigin src="/assets/index-CgK1dtQp.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BPnLoUUi.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>

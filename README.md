@@ -1,6 +1,6 @@
 # EQTY Skills
 
-Two agent skills for [EQTY](https://eqtylab.io) lineage manifests — signed,
+Three agent skills for [EQTY](https://eqtylab.io) lineage manifests — signed,
 content-addressed records of what a computation did: its inputs, tool calls,
 model calls and outputs, checkable by a third party without trusting anyone's
 word for it.
@@ -9,13 +9,15 @@ word for it.
 |---|---|---|
 | **`eqty-manifest`** | a manifest is in hand | parses it, verifies its signatures, content addresses, statement integrity and hardware attestation evidence, and writes a report |
 | **`eqty-instrument`** | you want your code to emit one | makes a repo emit a manifest, delivered as a patch for a human to review |
+| **`eqty-explorer`** | you want to see one | shows a manifest's lineage graph in your browser and drives it while the agent answers: shows only the nodes an answer is about, filters, selects, and opens a machine's chain of trust |
 
-They are two halves of one loop: `eqty-instrument` produces a manifest and
-points at it; `eqty-manifest` reads it back.
+`eqty-instrument` produces a manifest and points at it; `eqty-manifest` reads it
+back; `eqty-explorer` draws it. Answers always come from `eqty-manifest`, and the
+picture only illustrates them.
 
 ## Install
 
-Both skills install together, in Claude Code or Codex.
+All three skills install together, in Claude Code or Codex.
 
 **Claude Code plugin:**
 
@@ -31,9 +33,9 @@ codex plugin marketplace add eqtylab/eqty-skills
 codex plugin add eqty-skills@eqty-lab
 ```
 
-**Manually** — copy both skill directories from `plugins/eqty-skills/` into a
-skills folder, side by side (`eqty-instrument` calls `eqty-manifest` as its
-sibling):
+**Manually** — copy the three skill directories from `plugins/eqty-skills/` into a
+skills folder, side by side (`eqty-instrument` and `eqty-explorer` call
+`eqty-manifest` as their sibling):
 
 | Agent | For you, in every project | For one project |
 |---|---|---|
@@ -41,7 +43,7 @@ sibling):
 | Codex | `~/.agents/skills/` | `.agents/skills/` |
 
 ```sh
-cp -R plugins/eqty-skills/eqty-manifest plugins/eqty-skills/eqty-instrument ~/.claude/skills/    # or ~/.agents/skills/ for Codex
+cp -R plugins/eqty-skills/eqty-manifest plugins/eqty-skills/eqty-instrument plugins/eqty-skills/eqty-explorer ~/.claude/skills/    # or ~/.agents/skills/ for Codex
 ```
 
 ### Update
@@ -63,11 +65,11 @@ codex plugin marketplace upgrade eqty-lab
 ```
 
 `claude plugin list` and `codex plugin list` show the installed version.
-**Manually**, copy the two skill directories again, over the old ones.
+**Manually**, copy the three skill directories again, over the old ones.
 
 Each skill is self-contained: its directory carries everything its `SKILL.md`
 tells an agent to read or run, and refers to its own files relative to that
-directory. An install copies `plugins/eqty-skills/` and nothing else: the two
+directory. An install copies `plugins/eqty-skills/` and nothing else: the three
 skills, the plugin manifests, `LICENSE` and `NOTICE`. The rest of this
 repository ([`examples/`](examples/), [`docs/`](docs/), this README) is for people
 and is never installed.
@@ -86,8 +88,12 @@ and is never installed.
   project's dependencies, because the instrumented code imports it. In Mode 1
   the patch also adds EQTY's LangChain or DeepAgents handler package
   (`eqty-lineage-langchain` or `eqty-lineage-deepagents`), also on public PyPI.
+- **`eqty-explorer`** needs a browser, and nothing installed: `explorer.py` uses
+  the standard library only. It loads the lineage explorer's code from jsDelivr
+  (`@eqtylab/explorer`, pinned by version and hash); the manifest stays on your
+  machine.
 
-Both skills build on the open-source EQTY SDK (`eqty_sdk`):
+The skills build on the open-source EQTY SDK (`eqty_sdk`):
 [eqtylab/integrity-py](https://github.com/eqtylab/integrity-py), installed with
 `pip install eqty-sdk`.
 
@@ -120,7 +126,8 @@ Hashes:
 ```
 
 Or ask Claude about it — *"what does this manifest show?"* — and
-`eqty-manifest` takes over.
+`eqty-manifest` takes over. Then *"show me the graph"*, and `eqty-explorer`
+opens it in your browser.
 
 ## eqty-instrument, in two modes
 

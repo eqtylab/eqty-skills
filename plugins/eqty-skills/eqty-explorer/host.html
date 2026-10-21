@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EQTY lineage explorer</title>
+<style>
+  :root { --bg: #111114; --panel: #1b1b20; --text: #e8e8ec; --muted: #9a9aa6; --accent: #8b5cf6; --bad: #f87171; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
+  body { display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid #2a2a31; min-height: 42px; }
+  header b { white-space: nowrap; }
+  #note { flex: 1; color: var(--text); overflow-wrap: anywhere; }
+  #note:empty::before { content: "Ask your agent about this manifest; answers show here."; color: var(--muted); }
+  #status { color: var(--muted); white-space: nowrap; }
+  #status.bad { color: var(--bad); white-space: normal; max-width: 60%; }
+  main { flex: 1; display: flex; min-height: 0; }
+  iframe { border: 0; height: 100%; }
+  #explorer { display: block; flex: 1; min-width: 0; height: 100%; }
+  #trust-pane { display: none; flex-direction: column; width: 45%; }
+  /* The handle between the panes. Shown with the pane; drag it, or focus it and use the arrow keys. */
+  #divider { display: none; flex: none; width: 6px; cursor: col-resize; background: #2a2a31; touch-action: none; }
+  main:has(#trust-pane.open) #divider { display: block; }
+  #divider:hover, #divider:focus-visible, body.resizing #divider { background: var(--accent); outline: none; }
+  /* While dragging, the frames must not take the pointer, or the drag stops at their edge. */
+  body.resizing iframe { pointer-events: none; }
+  body.resizing { cursor: col-resize; user-select: none; }
+  #trust-pane.open { display: flex; }
+  #trust-pane div { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--panel); }
+  #trust-pane button { background: none; border: 1px solid #3a3a44; color: var(--text); border-radius: 4px; cursor: pointer; }
+  #trust { flex: 1; width: 100%; }
+</style>
+</head>
+<body>
+<header><b>EQTY lineage</b><span id="note"></span><span id="status">connecting…</span></header>
+<main>
+  <eqty-explorer id="explorer" theme="dark" show-upload="false"></eqty-explorer>
+  <div id="divider" role="separator" aria-orientation="vertical" aria-controls="trust-pane"
+       aria-label="Resize the chain of trust pane (double-click to reset)" tabindex="0"></div>
+  <section id="trust-pane">
+    <div><span>Chain of trust</span><button id="close-trust" type="button">Close</button></div>
+    <iframe id="trust" title="Chain of trust" sandbox="allow-scripts allow-same-origin"></iframe>
+  </section>
+</main>
+<script nonce="__NONCE__">
+"use strict";
+// Filled in by explorer.py: {trust, token, explorerSrc, explorerSri, explorerBase}.
+const CONFIG = __CONFIG__;
+const TRUST = new URL(CONFIG.trust).origin;
+const $ = (id) => document.getElementById(id);
+const explorer = $("explorer");
+const trust = $("trust");
+const headers = { "Content-Type": "application/json", "X-Eqty-Token": CONFIG.token };
+
+let manifest = null;
+let explorerLoaded = false;
+const waitingForExplorer = []; // commands that arrived before the manifest was on the canvas
+
+const report = (message) =>
+  fetch("/reply", { method: "POST", headers, body: JSON.stringify(message) }).catch(() => {});
+const setStatus = (text, bad = false) => { $("status").textContent = text; $("status").classList.toggle("bad", bad); };
+const showConnected = () => setStatus("connected");
+const ENDED =
+  "This session has ended (its server stopped, or a newer one replaced it). " +
+  "Close this tab and ask your agent to show the manifest again.";
+
+// ---- explorer: the <eqty-explorer> element. The agent sets its query and selection;
+// what the user does in it (a click, their own query) goes back as an event.
+explorer.addEventListener("manifestchange", () => {
+  explorerLoaded = true;
+  showConnected();
+  report({ type: "explorer/loaded" });
+  waitingForExplorer.splice(0).forEach(toExplorer);
+});
+explorer.addEventListener("nodeselect", (event) => report({ type: "explorer/selected", id: event.detail }));
+explorer.addEventListener("querychange", (event) => report({ type: "explorer/query-changed", query: event.detail }));
+
+// ponytail: the explorer reports no query result, so this reads its own "N of M nodes" line
+// (or "No nodes match") from its shadow DOM, waiting until two reads agree. Replace it with
+// a result event once the explorer has one.
+async function shownCount(query) {
+  if (!query.trim()) return {}; // no counter without a query; explorer.py knows the total
+  await new Promise((resolve) => setTimeout(resolve, 300)); // let the old count go first
+  let last = null;
+  for (let attempt = 0; attempt < 30; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const root = explorer.shadowRoot;
+    // The counter's own element, so digits in the query text beside it can't run into it.
+    const counter = [...(root?.querySelectorAll("span, div, p") ?? [])]
+      .find((el) => /^\d+ of \d+ nodes$/.test(el.textContent.trim()));
+    const counted = counter?.textContent.trim().match(/^(\d+) of (\d+) nodes$/);
+    const now = root?.textContent.includes("No nodes match") ? { shown: 0 }
+      : counted ? { shown: Number(counted[1]), total: Number(counted[2]) } : null;
+    if (now && JSON.stringify(now) === JSON.stringify(last)) return now;
+    last = now;
+  }
+  return last ?? {};
+}
+
+async function toExplorer(command) {
+  if (!explorerLoaded) return waitingForExplorer.push(command);
+  const { query, select } = command.message;
+  if (query !== undefined) explorer.query = query;
+  // A node the old query filtered out can only be selected once the new one has drawn it.
+  if (query !== undefined && select) await new Promise((resolve) => setTimeout(resolve, 300));
+  if (select !== undefined) explorer.selectedNodeId = select;
+  const applied = explorer.query ?? "";
+  report({ type: "explorer/applied", query: applied, ...(await shownCount(applied)), requestId: command.requestId });
+}
+
+// ---- chain of trust: frame it on first use, hand it the manifest, then focus a DID
+window.addEventListener("message", (event) => {
+  if (event.origin !== TRUST || event.source !== trust.contentWindow) return;
+  if (event.data && typeof event.data === "object") trustReplies.forEach((resolve) => resolve(event.data));
+});
+const trustReplies = new Set();
+const nextTrust = (type, timeoutMs = 20000) =>
+  new Promise((resolve, reject) => {
+    const done = (data) => { if (data.type === type) { trustReplies.delete(done); resolve(data); } };
+    trustReplies.add(done);
+    setTimeout(() => { trustReplies.delete(done); reject(new Error(`no ${type} from the chain-of-trust app`)); }, timeoutMs);
+  });
+let trustReady = null; // resolves once the app has the manifest
+let trustQueue = Promise.resolve();
+
+function openTrust() {
+  $("trust-pane").classList.add("open");
+  if (!trustReady) {
+    const ready = nextTrust("vcomp/ready");
+    trust.src = CONFIG.trust;
+    trustReady = ready.then(() => {
+      const loaded = nextTrust("vcomp/loaded");
+      trust.contentWindow.postMessage({ type: "vcomp/load-manifest", manifest, source: "eqty-explorer" }, TRUST);
+      return loaded;
+    });
+    trustReady.catch(() => { trustReady = null; });
+  }
+  return trustReady;
+}
+
+function toTrust(command) {
+  trustQueue = trustQueue.then(async () => {
+    try {
+      await openTrust();
+      // The app says loaded before its graph is built, so a DID can read as not found at
+      // first. Ask again until it is found or the graph has had 20 seconds.
+      let reply;
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const focused = nextTrust("vcomp/focused");
+        trust.contentWindow.postMessage({ type: "vcomp/focus-did", did: command.message.did }, TRUST);
+        reply = await focused;
+        if (reply.found) break;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+      report({ type: "vcomp/focused", did: reply.did, found: reply.found, requestId: command.requestId });
+    } catch (error) {
+      report({ type: "error", message: error.message, requestId: command.requestId });
+    }
+  });
+}
+$("close-trust").addEventListener("click", () => $("trust-pane").classList.remove("open"));
+
+// ---- the divider between the explorer and the chain of trust
+const pane = $("trust-pane");
+const divider = $("divider");
+const MIN_PANE = 240; // px left for either side
+function setPaneWidth(px) {
+  const width = Math.min(Math.max(px, MIN_PANE), window.innerWidth - MIN_PANE);
+  pane.style.width = `${width}px`;
+  divider.setAttribute("aria-valuenow", String(Math.round((100 * width) / window.innerWidth)));
+}
+let dragStartX = null;
+divider.addEventListener("pointerdown", (event) => {
+  dragStartX = event.clientX;
+  divider.setPointerCapture(event.pointerId);
+  document.body.classList.add("resizing");
+});
+divider.addEventListener("pointermove", (event) => {
+  if (divider.hasPointerCapture(event.pointerId)) setPaneWidth(window.innerWidth - event.clientX);
+});
+// Every way a drag can end, so the frames never stay unclickable: capture lost, a release
+// anywhere, or the window losing focus mid-drag.
+const endResize = () => document.body.classList.remove("resizing");
+// The release point counts too, for a pointer that jumps with no moves in between. A click
+// without movement (or the double-click reset) leaves the width alone.
+divider.addEventListener("pointerup", (event) => {
+  if (dragStartX !== null && Math.abs(event.clientX - dragStartX) > 2) setPaneWidth(window.innerWidth - event.clientX);
+  dragStartX = null;
+});
+divider.addEventListener("lostpointercapture", endResize);
+window.addEventListener("pointerup", endResize);
+window.addEventListener("blur", endResize);
+divider.addEventListener("dblclick", () => { pane.style.width = ""; });
+divider.addEventListener("keydown", (event) => {
+  const step = { ArrowLeft: 40, ArrowRight: -40 }[event.key];
+  if (!step) return;
+  event.preventDefault();
+  setPaneWidth(pane.getBoundingClientRect().width + step);
+});
+
+// ---- page: the note banner (text only, never HTML)
+function toPage(command) {
+  $("note").textContent = String(command.message.text || "");
+  report({ type: "page/noted", requestId: command.requestId });
+}
+
+// ---- commands from the agent, pushed by explorer.py
+function listen() {
+  const events = new EventSource(`/events?t=${encodeURIComponent(CONFIG.token)}`);
+  events.onmessage = (event) => {
+    const command = JSON.parse(event.data);
+    ({ explorer: toExplorer, trust: toTrust, page: toPage })[command.target]?.(command);
+  };
+  // The browser retries a dropped stream by itself (a laptop waking, a brief network blip), so
+  // an error is only "reconnecting" at first. It is the end of the session once the server
+  // refuses us (CLOSED) or hasn't come back within 10 seconds.
+  let endTimer = null;
+  let ended = false; // later retries keep failing; they must not turn "ended" back into "reconnecting"
+  const end = () => { ended = true; setStatus(ENDED, true); };
+  events.onerror = () => {
+    if (events.readyState === EventSource.CLOSED) return end();
+    if (ended) return;
+    setStatus("reconnecting…");
+    endTimer ??= setTimeout(end, 10000);
+  };
+  events.onopen = () => {
+    clearTimeout(endTimer);
+    endTimer = null;
+    ended = false;
+    showConnected();
+  };
+}
+
+// ---- pinned contexts: the service worker answers the explorer's context fetch from a local
+// copy. If it can't take control, a stricter policy blocks that URL before the explorer loads,
+// so the request never reaches the network either way.
+async function pinContexts() {
+  try {
+    await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+    await navigator.serviceWorker.ready;
+    if (!navigator.serviceWorker.controller) {
+      await new Promise((resolve, reject) => {
+        navigator.serviceWorker.addEventListener("controllerchange", resolve, { once: true });
+        setTimeout(() => reject(new Error("the service worker did not take control")), 3000);
+      });
+    }
+  } catch (error) {
+    const meta = document.createElement("meta");
+    meta.httpEquiv = "Content-Security-Policy";
+    meta.content = `connect-src 'self' ${CONFIG.explorerBase}`;
+    document.head.append(meta);
+    console.warn("pinned contexts unavailable; their URLs are blocked:", error.message);
+  }
+}
+
+// The published explorer, pinned by version and hash, loaded once the contexts are pinned.
+function loadExplorer() {
+  const script = document.createElement("script");
+  script.type = "module";
+  script.src = CONFIG.explorerSrc;
+  script.integrity = CONFIG.explorerSri;
+  script.crossOrigin = "anonymous";
+  document.head.append(script);
+}
+
+pinContexts().then(loadExplorer);
+
+fetch(`/manifest?t=${encodeURIComponent(CONFIG.token)}`)
+  .then((response) => response.json())
+  .then(async (json) => {
+    manifest = json;
+    listen();
+    // A property set before the element is defined would hide its setter, so wait for it.
+    await customElements.whenDefined("eqty-explorer");
+    explorer.manifest = manifest;
+  })
+  .catch((error) => setStatus(`could not read the manifest: ${error.message}`, true));
+</script>
+</body>
+</html>

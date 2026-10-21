@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.3.0 — 2026-10-21
+
+- **eqty-explorer** — a new skill that shows a manifest's lineage graph in the
+  browser and drives it while the agent answers. Ask *"show me the graph"*, or say
+  yes when an `eqty-manifest` answer offers it. The agent shows only the nodes an
+  answer is about, filters by type, signer, metadata or date, selects a node, and
+  opens a machine's chain of trust. A node you click, or a query you type into the
+  explorer, becomes a question it answers.
+  - **Answers still come from `eqty-manifest`.** The picture illustrates them and
+    is never evidence; trust claims quote its summary block.
+  - **The manifest stays on your machine.** `explorer.py serve` runs a local server
+    on 127.0.0.1. The page loads the published lineage explorer (`@eqtylab/explorer`
+    0.19.0, from jsDelivr, pinned by version and hash) and a pinned copy of the
+    chain-of-trust app, served on its own local origin. Both run under a content
+    security policy that lets them connect only to where their code comes from, and
+    the one credential context the explorer fetches is answered by a service worker
+    from a pinned copy. The agent asks before opening the browser.
+  - **Codex's sandbox:** only `serve` needs approval; the other commands reach the
+    server through files in the temp directory.
+  - `eqty-manifest` is unchanged and works without it.
+
 ## 0.2.10 — 2026-10-20
 
 - **eqty-instrument** — the Mode 1 handler packages are on public PyPI:
