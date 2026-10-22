@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.1 — 2026-10-22
+
+- **Identity attestations verify again.** They name EQTY's
+  `https://ns.eqtylab.io/vc/identity-attestation/v1` context, which manifests do
+  not embed and eqty-sdk does not include, so 0.4.0 reported genuine ones as
+  failed (`unresolved_context`). eqty-manifest now carries a pinned copy (the
+  same one eqty-explorer uses), used only when it matches its recorded hash; a
+  context the manifest embeds still takes precedence.
+- **A context nobody carries reads *not checked*, not failed.** Contexts are
+  never fetched, so the check could not run. Every other reason the SDK gives
+  is still a failure.
+
 ## 0.4.0 — 2026-10-22
 
 - **eqty-manifest judges each credential at its time of use**, with

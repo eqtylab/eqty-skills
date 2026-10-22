@@ -106,8 +106,12 @@ documents their credentials declare.
 
 The original property survives the move: contexts now come from a pinned,
 versioned dependency that resolves them offline, not from a `contexts/`
-folder anyone can drop a file into. The skill still ships no loose context
-files. A manifest's own `contexts` are still passed through and still take
+folder anyone can drop a file into. The skill ships no loose context files.
+The one exception is EQTY's own `https://ns.eqtylab.io/vc/identity-attestation/v1`,
+which identity attestations name and neither manifests nor the SDK carry:
+`contexts/identity-attestation-v1.json` is a pinned copy (the explorer's), used
+only when it matches the hash in `contexts/SOURCE.md`, and no other file there
+is read. A manifest's own `contexts` are still passed through and still take
 **precedence**, which is what keeps a credential signed under an older
 revision of `credentials/v2` verifying.
 
@@ -175,15 +179,19 @@ issuer's attestation*, *Used outside its validity period*).
 judges dates at the current time whatever `at` says. Their result has
 `atApplied: false`, and `summary.py` counts them in a note.
 
-**Every reason is a failure.** `verify_vc_detailed` names why a credential does
-not verify, and the script reports its code as is (`valid: false`):
-`invalid_signature`, `invalid_proof`, `missing_proof`, `malformed`,
-`invalid_claims`, `subject_mismatch`, `unsupported_suite`,
-`unresolved_context`, `unresolved_key`, `unverifiable`, `legacy_rejected`,
-plus `expired` / `not_yet_valid` when judged at now. A credential's suite,
-contexts, key and shape are signed parts of it, so an altered credential can
-produce any of these; none means "could not check". The script no longer
-guesses reasons from the credential's fields.
+**Every reason but one is a failure.** `verify_vc_detailed` names why a
+credential does not verify, and the script reports its code as is
+(`valid: false`): `invalid_signature`, `invalid_proof`, `missing_proof`,
+`malformed`, `invalid_claims`, `subject_mismatch`, `unsupported_suite`,
+`unresolved_key`, `unverifiable`, `legacy_rejected`, plus `expired` /
+`not_yet_valid` when judged at now. A credential's suite, key and shape are
+signed parts of it, so an altered credential can produce any of these. The
+script no longer guesses reasons from the credential's fields.
+
+`unresolved_context` reads **not checked** (`valid: null`): the credential names
+a context that is neither in the manifest, compiled into the SDK, nor pinned
+in `contexts/`, and contexts are never fetched. That is usually an emitter
+that did not embed it, not tampering.
 
 ```bash
 uv run <skill-dir>/verify_credentials.py manifest.json                  # verify every credential
@@ -198,7 +206,7 @@ Each result is `{"valid": true, "keyType": ...}`,
 `{"valid": false, "reason": ..., "detail": ...}` (any SDK reason above,
 `used_outside_validity` or `empty_validity_period`), or
 `{"valid": null, "reason": ..., "detail": ...}` for something that couldn't
-be checked at all (`unresolvable_signing_key` — a DID method needing the
+be checked at all (`unresolved_context`, `unresolvable_signing_key` — a DID method needing the
 network — `no_signature`, `verifier_error`).
 `null` is not "passed," treat it as "unverified," not as "trusted."
 

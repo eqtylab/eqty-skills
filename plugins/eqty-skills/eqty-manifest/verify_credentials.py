@@ -69,7 +69,10 @@ USAGE
 
 import sys
 import os
+import re
 import json
+import hashlib
+from functools import lru_cache
 from datetime import datetime, timezone
 
 try:
@@ -188,17 +191,42 @@ def context_loader(embedded=None, prefer_embedded=True, revision=0):
     return ContextSet(embedded)
 
 
-def _contexts_arg(contexts):
-    """Normalize whatever a caller passed into the dict the SDK wants.
-    Accepts a dict, a ContextSet, None, or a legacy pyld loader callable
-    (which carries no contexts we can recover -- treated as empty)."""
-    if contexts is None:
+# Contexts EQTY credentials name that manifests do not embed and the SDK does
+# not compile in. Pinned copies live in contexts/, with their hashes in
+# contexts/SOURCE.md.
+PINNED_CONTEXTS = {"https://ns.eqtylab.io/vc/identity-attestation/v1": "identity-attestation-v1.json"}
+
+
+@lru_cache(maxsize=None)
+def pinned_contexts():
+    """URL -> document for each pinned context whose file matches the hash
+    recorded in contexts/SOURCE.md. A file that does not match is left out,
+    so the credentials naming it read not checked rather than verified."""
+    d = os.path.join(SCRIPT_DIR, "contexts")
+    try:
+        recorded = {n: h for h, n in re.findall(r"^([0-9a-f]{64})  (\S+)$",
+                                                open(os.path.join(d, "SOURCE.md")).read(), re.M)}
+    except OSError:
         return {}
+    out = {}
+    for url, name in PINNED_CONTEXTS.items():
+        try:
+            raw = open(os.path.join(d, name), "rb").read()
+        except OSError:
+            continue
+        if hashlib.sha256(raw).hexdigest() == recorded.get(name):
+            out[url] = json.loads(raw)
+    return out
+
+
+def _contexts_arg(contexts):
+    """Normalize whatever a caller passed into the dict the SDK wants, with
+    the pinned contexts added. A context the caller supplies for the same URL
+    takes precedence. Accepts a dict, a ContextSet, None, or a legacy pyld
+    loader callable (which carries no contexts we can recover)."""
     if isinstance(contexts, ContextSet):
-        return contexts.as_dict()
-    if isinstance(contexts, dict):
-        return contexts
-    return {}
+        contexts = contexts.as_dict()
+    return {**pinned_contexts(), **(contexts if isinstance(contexts, dict) else {})}
 
 
 # ------------------------------------------------------- W3C credentials
@@ -219,7 +247,14 @@ def _time(value):
 
 
 def _detailed(credential, statement_id, ctx, at):
-    return eqty_sdk.verify_vc_detailed(json.dumps(credential), statement_id, ctx, at=at)
+    r = eqty_sdk.verify_vc_detailed(json.dumps(credential), statement_id, ctx, at=at)
+    if r["reason"] == "unresolved_context":
+        raise _Unchecked(r["detail"])
+    return r
+
+
+class _Unchecked(Exception):
+    """A context the credential names could not be loaded."""
 
 
 def verify_credential(credential: dict, contexts=None, statement_id: str = None, at: str = None):
@@ -239,9 +274,10 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None,
     checks are complementary and neither is sufficient alone.
 
     The reason for a False comes from `verify_vc_detailed` and is reported as
-    is. Every one of its codes is a failure: a credential's suite, contexts,
-    key and shape are signed parts of it, so an altered credential can produce
-    any of them.
+    is. Every one of its codes is a failure -- a credential's suite, key and
+    shape are signed parts of it, so an altered credential can produce any of
+    them -- except `unresolved_context`: a context neither the manifest, the
+    SDK nor contexts/ carries is never fetched, so that reads not checked.
 
     `at` outside the credential's validity period: the SDK checks dates before
     the signature, so the signature is checked again at a time inside the
@@ -268,7 +304,7 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None,
         "verificationMethod": proof.get("verificationMethod"),
         "issuer": credential.get("issuer"),
         "subject": subject,
-        "contextSource": "manifest+sdk-embedded" if ctx else "sdk-embedded",
+        "contextSource": "manifest+sdk-embedded" if contexts else "sdk-embedded",
         # What the SDK's statement_id binding actually buys here: it
         # confirms the proof covers the subject the credential NAMES. It is
         # not proof that the credential belongs in the statement carrying
@@ -311,6 +347,11 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None,
                                "verifies at %s." % (at, credential.get("validFrom") or "an unstated start",
                                                     credential.get("validUntil") or "no end", inside))
         return dict(result, valid=False, reason=r["reason"], detail=r["detail"])
+    except _Unchecked as e:
+        return dict(result, valid=None, reason="unresolved_context",
+                    detail="%s. The context is neither in the manifest, compiled into the SDK, "
+                           "nor pinned in contexts/, and is never fetched; this is unchecked, "
+                           "not forged." % e)
     except ValueError as e:
         # Not a credential at all: not JSON, no credentialSubject, or more
         # than one subject. A defect in the file, so a FAILED check.

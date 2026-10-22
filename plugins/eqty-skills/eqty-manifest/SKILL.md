@@ -224,8 +224,9 @@ How to read it:
   reason the SDK gives is a failure, shown in brackets — e.g. *Signature
   validation failed for … (unsupported_suite)*. An altered credential can
   produce any of them, so don't call one "unknown" or "not forged"
-  (`references/verification.md`). Only a DID method that needs the network
-  (`unresolvable_signing_key`) or an SDK error reads *not checked*.
+  (`references/verification.md`). Only a context nobody carries
+  (`unresolved_context`; contexts are never fetched), a DID method that needs
+  the network (`unresolvable_signing_key`) or an SDK error reads *not checked*.
 - **An expired credential that verified at its time of use is fine.** The note
   under the Summary rows says so, with the date it expired; for an identity
   credential it also says it was in force when used. That is normal for a
