@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["eqty-sdk>=2.4.1", "cryptography", "base58"]
+# dependencies = ["eqty-sdk>=2.5.0", "cryptography", "base58"]
 # ///
 """
 report.py — Render an EQTY lineage manifest as a self-contained HTML report.
@@ -1097,7 +1097,7 @@ def _legacy_trust(a, tr, rows):
             detail.append("JSON-LD contexts resolved from: " + ", ".join(
                 "%s (%d)" % (k, v) for k, v in sorted(s["context_sources"].items())))
         if s.get("reasons"):
-            detail.append("Unverifiable reasons: " + ", ".join(
+            detail.append("Reasons: " + ", ".join(
                 "%s (%d)" % (k, v) for k, v in sorted(s["reasons"].items())))
         if detail:
             a("<p>%s</p>" % "<br>".join(E(d) for d in detail))

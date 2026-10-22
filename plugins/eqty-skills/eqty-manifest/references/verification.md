@@ -85,12 +85,14 @@ or a verification failure shouldn't block the much more commonly-needed job
 of just reading the manifest.
 
 **It delegates to the SDK; it no longer reimplements the proof check.**
-`eqty_sdk` 2.4.1 exposes the same two checks with the W3C contexts compiled
-into the package, both fully offline:
+`eqty_sdk` (2.5.0 or later) exposes the same two checks with the W3C contexts
+compiled into the package, both fully offline:
 
 ```python
-verify_statement(statement_json, contexts=None)        # does it still hash to its @id?
-verify_vc(vc_json, statement_id=None, contexts=None)   # is the proof good, and about THIS statement?
+verify_statement(statement_json, contexts=None)   # does it still hash to its @id?
+verify_vc_detailed(vc_json, statement_id=None, contexts=None, at=None)
+    # is the proof good, about THIS statement, and in force at `at`?
+    # -> {valid, reason, detail, at_applied}
 ```
 
 This replaced a hand-rolled `pyld` + `cryptography` implementation that
@@ -124,53 +126,84 @@ quoted from them below is background, not something to look for on disk:
 | secp256k1 | `0xe7` | none in the corpus — the key is decoded, but no proof type is known to verify |
 | P-384 (secp384r1) | `0x1201` | none in the corpus — as above |
 
-`verify_vc` returns a **bare boolean**: a `false` folds together a bad proof,
-a subject mismatch, and a proof the SDK simply cannot check. So when it says
-`false`, the script looks at the credential's fields (no cryptography) to
-recover the last case, and reports it as **not checked** (`valid: null`), never
-as failed:
+**When a credential is judged.** At the time it was used, never at the time
+of reading: verification always comes after the run, so a short-lived
+attestation (an OpenShell sandbox identity valid for ten minutes) is nearly
+always expired by then. The time is, in order:
 
-| reason | when | `found` |
-|---|---|---|
-| `expired` / `not_yet_valid` | now is after `validUntil` / before `validFrom`. The SDK checks those dates before the proof and stops there, so the signature was **not checked**: an expired credential is not a failed one, and this says nothing about whether it was valid when issued. Checked first, and only for credentials without `issuanceDate`, which the SDK's legacy path verifies signature first | the date |
-| `unsupported_proof_type` | the proof type is not one the SDK is known to verify (table above) | the proof type |
-| `alg_mismatch` | the JWS header's `alg` disagrees with the proof type | the header's `alg` |
-| `key_type_mismatch` | the signing `did:key` is a different key type than the proof type uses | the key type |
-| `unrecognized_context` | an `@context` URL is neither in the manifest's `contexts` nor one the SDK compiles in (`credentials/v2`, `security/v2`, `security/v1`) | the URL |
+1. its subject statement's `timestamp`, when the subject is a statement in the
+   manifest. The credential signs the subject's `@id`, which commits to that
+   timestamp, so it cannot be changed without the signature failing;
+2. else its `CredentialRegistration`'s own `timestamp` (an identity credential,
+   whose subject is a DID). Only the registration's `@id` covers this one, so
+   whoever writes the manifest could choose it. A chosen time cannot make a bad
+   signature pass, because the validity period is signed; it can only place a
+   late use inside the period;
+3. else now (no parseable timestamp).
 
-Otherwise the result is `signature_mismatch`: **not verified**, but still not
-proof of forgery. Two limits, by design:
+`--at <RFC 3339 time>` judges every credential at one given time instead. The
+credential's own `validFrom` and proof `created` are never used for "when":
+integrity's signer backdates both by an hour. The result records `checkedAt`
+and `checkedAtSource` (`subject`, `registration`, `given`, or null).
 
-- **It never makes anything verified.** It only runs after the SDK said
-  `false`, so the worst a tamperer gains by also editing these fields is *not
-  checked* instead of *failed*.
-- **The known lists are observations.** integrity-py does not publish which
-  proof types and contexts it supports, so these are the ones seen verifying.
-  If the SDK adds one, it returns `true` and the lists are never consulted; a
-  stale list can only turn a *failed* into *not checked*. The real fix is
-  upstream: `verify_vc` returning a reason instead of a boolean.
+The SDK checks dates before the signature. So when the time of use falls
+outside the validity period, the script checks the signature again at a time
+inside it (`validFrom`, else `validUntil`) and reports:
+
+| result | meaning |
+|---|---|
+| `used_outside_validity` (`found`: the time of use) | the signature verifies, but it was used outside its validity period. **Failed** |
+| the signature's own reason, e.g. `invalid_signature` | the credential was altered. **Failed** |
+| `empty_validity_period` | `validUntil` is before `validFrom`, so no time can check the signature. **Failed** |
+
+A credential that verifies at its time of use but is outside its period now
+gets `nowReason` (`expired` / `not_yet_valid`) and `found` (the date). That is
+not a problem; `summary.py` prints it as a note under the Summary rows. For an
+identity credential (subject is a DID) the note also says, from the
+statements' own `timestamp`s:
+
+- **the chain:** whether it was registered while its issuer's identity
+  attestation in this manifest was in force (not reported for a self-attested
+  root, or an issuer with no attestation here);
+- **the use:** how many of the statements its subject registered carry a
+  timestamp inside its validity period.
+
+Either out of order is a failure line of its own (*Registered outside its
+issuer's attestation*, *Used outside its validity period*).
+
+**Credentials with `issuanceDate`** go through the SDK's legacy verifier, which
+judges dates at the current time whatever `at` says. Their result has
+`atApplied: false`, and `summary.py` counts them in a note.
+
+**Every reason is a failure.** `verify_vc_detailed` names why a credential does
+not verify, and the script reports its code as is (`valid: false`):
+`invalid_signature`, `invalid_proof`, `missing_proof`, `malformed`,
+`invalid_claims`, `subject_mismatch`, `unsupported_suite`,
+`unresolved_context`, `unresolved_key`, `unverifiable`, `legacy_rejected`,
+plus `expired` / `not_yet_valid` when judged at now. A credential's suite,
+contexts, key and shape are signed parts of it, so an altered credential can
+produce any of these; none means "could not check". The script no longer
+guesses reasons from the credential's fields.
 
 ```bash
 uv run <skill-dir>/verify_credentials.py manifest.json                  # verify every credential
 uv run <skill-dir>/verify_credentials.py manifest.json <statement_id>    # verify just one
+uv run <skill-dir>/verify_credentials.py manifest.json --at 2026-09-02T20:30:56Z   # at one time
 ```
 
 Output carries **two independent axes** — `signatures` and
 `statementIntegrity` — plus a `summary` tallying each. Do not merge them.
 
 Each result is `{"valid": true, "keyType": ...}`,
-`{"valid": false, "reason": ..., "detail": ...}` (`signature_mismatch`,
-`subject_mismatch`, or `malformed_credential` — a credential that does not
-parse is a defect in the file, not an unchecked one), or
+`{"valid": false, "reason": ..., "detail": ...}` (any SDK reason above,
+`used_outside_validity` or `empty_validity_period`), or
 `{"valid": null, "reason": ..., "detail": ...}` for something that couldn't
-be checked at all (`expired`, `not_yet_valid`, `unsupported_proof_type`, `alg_mismatch`,
-`key_type_mismatch`, `unrecognized_context` — see above —
-`unresolvable_signing_key` — a DID method needing the network — `no_proof`,
-`no_signature`, `verifier_error`).
+be checked at all (`unresolvable_signing_key` — a DID method needing the
+network — `no_signature`, `verifier_error`).
 `null` is not "passed," treat it as "unverified," not as "trusted."
 
 **Two axes, and neither implies the other.** `verify_statement` asks whether
-a statement still hashes to its `@id`; `verify_vc` asks whether a proof is
+a statement still hashes to its `@id`; `verify_vc_detailed` asks whether a proof is
 good. A credential lifted verbatim into a different `CredentialRegistration`
 keeps a **valid signature** — it still truthfully attests its original
 subject — and is caught *only* by statement integrity. Conversely a statement
@@ -223,8 +256,8 @@ records which case applied (`manifest+sdk-embedded` or `sdk-embedded`).
 Across the development corpus **all 390 signed statements now verify** — 379
 W3C credentials plus 11 Sigstore bundles. Before the SDK only 80 were
 checkable, the other 310 reporting `canonicalization_failed` purely because
-their manifests omitted the W3C contexts. That reason code no longer occurs;
-`verify_vc` returns a bare boolean and never reports it.
+their manifests omitted the W3C contexts. That reason code no longer occurs:
+the SDK resolves those contexts itself.
 
 The older caution still applies in a narrower form: a `null` is **unchecked,
 not failing**, and must never be described as invalid or forged.

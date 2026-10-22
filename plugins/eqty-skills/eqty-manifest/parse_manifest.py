@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["eqty-sdk>=2.4.1", "cryptography", "base58"]
+# dependencies = ["eqty-sdk>=2.5.0", "cryptography", "base58"]
 # ///
 """
 parse_manifest.py — Decode and reconstruct an EQTY Lab lineage manifest.

@@ -77,7 +77,7 @@ and is never installed.
 ## Requirements
 
 - **Python 3.10+.**
-- **`eqty-manifest`** needs `eqty-sdk`, `cryptography` and `base58` to verify.
+- **`eqty-manifest`** needs `eqty-sdk` (2.5.0 or later), `cryptography` and `base58` to verify.
   With [uv](https://docs.astral.sh/uv/), `uv run` installs them per script;
   otherwise `pip install -r plugins/eqty-skills/eqty-manifest/requirements.txt`. Without them the
   scripts still parse and report, and every check they cannot run says

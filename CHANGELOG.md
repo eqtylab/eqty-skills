@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.4.0 — 2026-10-22
+
+- **eqty-manifest judges each credential at its time of use**, with
+  `verify_vc_detailed` from eqty-sdk 2.5.0. The time is the subject statement's
+  `timestamp`, which the credential's signature covers; else the registration's
+  own `timestamp`; else now. `verify_credentials.py --at <time>` checks every
+  credential at one time instead.
+  - **Expired now, valid when used, verifies.** A note under the Summary rows
+    says it has since expired; for an identity credential, also that it was in
+    force when used. Before, an expired credential read *not checked*.
+  - **Used outside its validity period fails** (`used_outside_validity`), after
+    its signature is checked inside the period, so an edited validity period
+    fails as `invalid_signature`.
+  - **Every reason the SDK gives is a failure**, shown as is (`invalid_signature`,
+    `unsupported_suite`, `unresolved_context`, `unresolved_key`, …): an altered
+    credential can produce any of them. The skill no longer guesses reasons from
+    the credential's fields. Only a DID that needs the network still reads
+    *not checked*.
+  - **Credentials with `issuanceDate`** can only be judged at the current time;
+    the summary counts them in one note.
+- **Requires eqty-sdk 2.5.0 or later.** `uv run` picks it up; with pip, upgrade
+  with `pip install -U -r plugins/eqty-skills/eqty-manifest/requirements.txt`.
+
 ## 0.3.0 — 2026-10-21
 
 - **eqty-explorer** — a new skill that shows a manifest's lineage graph in the

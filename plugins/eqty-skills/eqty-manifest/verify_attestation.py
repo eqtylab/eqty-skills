@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["eqty-sdk>=2.4.1", "cryptography", "base58"]
+# dependencies = ["eqty-sdk>=2.5.0", "cryptography", "base58"]
 # ///
 """Verify the HARDWARE ATTESTATION EVIDENCE carried in an EQTY manifest.
 

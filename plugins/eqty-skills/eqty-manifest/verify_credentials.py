@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["eqty-sdk>=2.4.1", "cryptography", "base58"]
+# dependencies = ["eqty-sdk>=2.5.0", "cryptography", "base58"]
 # ///
 """
 verify_credentials.py — Verify the signatures inside an EQTY Lab lineage
@@ -19,11 +19,12 @@ unchecked. On the current mode-2 manifests that was *every* credential,
 because manifests embed only the two `urn:cid:` EQTY vocabularies and not
 the W3C `credentials/v2` / `security/v2` documents the credentials declare.
 
-eqty_sdk 2.4.1 exposes the same two checks, with the W3C contexts compiled
-into the package:
+eqty_sdk exposes the same two checks, with the W3C contexts compiled into
+the package (`verify_vc_detailed` from 2.5.0):
 
     verify_statement(statement_json, contexts=None) -> bool
-    verify_vc(vc_json, statement_id=None, contexts=None) -> bool
+    verify_vc_detailed(vc_json, statement_id=None, contexts=None, at=None)
+        -> {valid, reason, detail, at_applied}
 
 Both run fully offline. That resolves the gap without reintroducing the
 thing the old docstring was protecting against: the contexts now come from
@@ -31,7 +32,7 @@ a pinned, versioned dependency rather than from loose files sitting beside
 the script, so a verdict is still not an artifact of the working directory.
 
 TWO SEPARATE QUESTIONS, KEPT SEPARATE
-  - `verify_vc`        — is the credential's proof cryptographically good,
+  - `verify_vc_detailed` — is the credential's proof cryptographically good,
                          and is it about THIS statement? Passing
                          `statement_id` is what makes the second half true;
                          a valid signature over some other subject says
@@ -44,25 +45,31 @@ These are reported on separate axes and never merged into one verdict.
 WHAT THE SDK DOES NOT COVER: SIGSTORE
 Some `CredentialRegistration` statements carry no W3C `credential` at all,
 but a Sigstore bundle wrapping an in-toto attestation in a DSSE envelope.
-`verify_vc` does not read those. The DSSE path below is therefore kept as
+The SDK does not read those. The DSSE path below is therefore kept as
 local code, unchanged, and still needs `cryptography` + `base58`.
 
-REVOCATION IS STILL NOT CHECKED. `verify_vc` checks the cryptographic proof
+WHEN A CREDENTIAL IS JUDGED. At the time it was used: its subject
+statement's `timestamp` (part of the @id the credential signs), else its
+registration's `timestamp`, else now. An expired credential that was in force
+when used verifies; one used outside its validity period fails as
+`used_outside_validity`. `--at` judges every credential at one given time.
+
+REVOCATION IS STILL NOT CHECKED. The SDK checks the cryptographic proof
 only; revocation and suspension live in a status list that is fetched over
 the network. A `valid: true` here means correctly signed, not "still valid".
 
-REQUIRES: eqty_sdk>=2.4.1 (proofs) and, for the Sigstore path only,
+REQUIRES: eqty_sdk>=2.5.0 (proofs) and, for the Sigstore path only,
           `cryptography` and `base58`.
 
 USAGE
     uv run verify_credentials.py <manifest.json>                 # verify all
     uv run verify_credentials.py <manifest.json> <statement_id>   # verify one
+    uv run verify_credentials.py <manifest.json> --at 2026-09-02T20:30:56Z
 """
 
 import sys
 import os
 import json
-import base64
 from datetime import datetime, timezone
 
 try:
@@ -111,21 +118,16 @@ def _check_deps():
     Sigstore path, so their absence is reported there rather than here."""
     if eqty_sdk is None:
         raise SystemExit(
-            "Missing required package: eqty_sdk (>=2.4.1) -- run the script with `uv run`, or: pip install -r requirements.txt\n"
-            "Signature verification now delegates to the SDK's verify_vc/"
+            "Missing required package: eqty_sdk (>=2.5.0) -- run the script with `uv run`, or: pip install -r requirements.txt\n"
+            "Signature verification now delegates to the SDK's verify_vc_detailed/"
             "verify_statement rather than reimplementing the proof check."
         )
-    for fn in ("verify_vc", "verify_statement"):
+    for fn in ("verify_vc_detailed", "verify_statement"):
         if not hasattr(eqty_sdk, fn):
             raise SystemExit(
-                "eqty_sdk is installed but has no %s(); that entry point "
-                "landed in 2.4.1. Upgrade the SDK." % fn
+                "eqty_sdk is installed but has no %s(); this script needs "
+                "eqty_sdk 2.5.0 or later. Upgrade the SDK." % fn
             )
-
-
-def b64url_decode(s: str) -> bytes:
-    s += "=" * ((-len(s)) % 4)
-    return base64.urlsafe_b64decode(s)
 
 
 def decode_did_key(did_key: str):
@@ -201,23 +203,6 @@ def _contexts_arg(contexts):
 
 # ------------------------------------------------------- W3C credentials
 
-# What eqty_sdk is KNOWN to verify: the proof types, JWS algorithms and key
-# types seen verifying across the development corpus, and the W3C contexts the
-# SDK documents as compiled in. integrity-py does not publish these lists, so
-# they are observations, not a contract -- which is why they are consulted
-# ONLY after `verify_vc` has already returned False. A stale list can then turn
-# a "failed" into "not checked", never anything into "verified".
-SDK_PROOF_TYPES = {                      # proof type -> (JWS alg, did:key type)
-    "Ed25519Signature2018": ("EdDSA", "ed25519"),
-    "EcdsaSecp256r1Signature2019": ("ES256", "p256"),
-}
-SDK_CONTEXTS = {
-    "https://www.w3.org/ns/credentials/v2",
-    "https://w3id.org/security/v2",
-    "https://w3id.org/security/v1",
-}
-
-
 def _instant(value):
     try:
         return datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -225,76 +210,21 @@ def _instant(value):
         return None
 
 
-def outside_validity(credential: dict, now=None):
-    """After `verify_vc` says False: is the credential outside its validity
-    period? Returns (reason, found, detail) or None.
-
-    eqty_sdk checks `validFrom` / `validUntil` before the proof and stops at
-    the first failure (ssi validates claims, then proofs), so for such a
-    credential the signature was never checked. It reads NOT CHECKED, with the
-    date, rather than "unsupported" or "failed". A credential with
-    `issuanceDate` takes the SDK's legacy path, which checks the signature
-    first, so it is left to the other checks. Dates are signed fields; the
-    worst a tamperer gains by editing one is "not checked"."""
-    if "issuanceDate" in credential:
-        return None
-    now = now or datetime.now(timezone.utc)
-    start, end = _instant(credential.get("validFrom")), _instant(credential.get("validUntil"))
-    if end and now > end:
-        reason, found, state = "expired", credential["validUntil"], "expired at %s" % credential["validUntil"]
-    elif start and now < start:
-        reason, found, state = "not_yet_valid", credential["validFrom"], "is not valid until %s" % credential["validFrom"]
-    else:
-        return None
-    return (reason, found,
-            "The credential %s (valid from %s to %s). eqty_sdk checks a credential's "
-            "dates before its signature and stops there, so the signature was not "
-            "checked: this says nothing about whether it was valid when issued. "
-            "Unchecked, not forged." % (state, credential.get("validFrom") or "an unstated start",
-                                        credential.get("validUntil") or "no end"))
+def _time(value):
+    """`value` when it is an RFC 3339 time with a zone, else None: the SDK
+    raises ValueError for anything else, which would read as a malformed
+    credential."""
+    t = _instant(value)
+    return value if t is not None and t.tzinfo is not None else None
 
 
-def why_uncheckable(credential: dict, contexts=None, key_type=None):
-    """After `verify_vc` says False: is that because the SDK cannot check this
-    credential at all? Returns (reason, found, detail) or None.
-
-    Field comparisons only -- no cryptography. `verify_vc` folds "bad proof"
-    and "cannot check" into one boolean; this recovers the second, so a proof
-    type the SDK does not handle reads as NOT CHECKED rather than as a failed,
-    forged-looking signature. It never upgrades a result: the worst a
-    tamperer gains by also editing these fields is "not checked"."""
-    proof = credential.get("proof") or {}
-    ptype = proof.get("type")
-    if ptype not in SDK_PROOF_TYPES:
-        return ("unsupported_proof_type", ptype,
-                "Proof type %r is not one eqty_sdk is known to verify (%s). "
-                "Unchecked, not forged." % (ptype, ", ".join(sorted(SDK_PROOF_TYPES))))
-    want_alg, want_key = SDK_PROOF_TYPES[ptype]
-    jws = proof.get("jws")
-    if isinstance(jws, str) and "." in jws:
-        try:
-            alg = json.loads(b64url_decode(jws.split(".", 1)[0])).get("alg")
-        except Exception:  # noqa: BLE001 - an undecodable header is a broken proof, not an uncheckable one
-            alg = want_alg
-        if alg != want_alg:
-            return ("alg_mismatch", alg,
-                    "JWS header alg %r does not match %s, which uses %r. The SDK "
-                    "cannot check a proof whose parts disagree." % (alg, ptype, want_alg))
-    if key_type and key_type != want_key:
-        return ("key_type_mismatch", key_type,
-                "The signing did:key is %s but %s uses %s keys." % (key_type, ptype, want_key))
-    known = SDK_CONTEXTS | set((contexts or {}).keys() if isinstance(contexts, dict) else ())
-    declared = credential.get("@context")
-    for c in declared if isinstance(declared, list) else [declared]:
-        if isinstance(c, str) and c not in known:
-            return ("unrecognized_context", c,
-                    "@context %r is neither carried by the manifest nor one eqty_sdk "
-                    "compiles in, and contexts are never fetched." % c)
-    return None
+def _detailed(credential, statement_id, ctx, at):
+    return eqty_sdk.verify_vc_detailed(json.dumps(credential), statement_id, ctx, at=at)
 
 
-def verify_credential(credential: dict, contexts=None, statement_id: str = None):
-    """Verify one embedded W3C Verifiable Credential's proof via the SDK.
+def verify_credential(credential: dict, contexts=None, statement_id: str = None, at: str = None):
+    """Verify one embedded W3C Verifiable Credential's proof via the SDK,
+    judging its dates at `at` (an RFC 3339 time; None means now).
 
     Returns a result dict; never raises for an ordinary verification
     failure. `statement_id`, when given, is passed to the SDK so the
@@ -308,21 +238,25 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None)
     because the registration's `@id` commits to its own content. The two
     checks are complementary and neither is sufficient alone.
 
-    The SDK returns a bare bool, so the distinction the old script drew
-    between "signature is wrong" and "could not canonicalize" is no longer
-    available from the verifier itself -- `verify_vc` folds an unresolvable
-    context into `False` alongside a bad proof. We therefore do not invent a
-    reason we cannot support: a `False` is reported as `signature_mismatch`
-    only when the credential's declared contexts are all resolvable in
-    principle, and the detail text says plainly what False does and does not
-    distinguish."""
+    The reason for a False comes from `verify_vc_detailed` and is reported as
+    is. Every one of its codes is a failure: a credential's suite, contexts,
+    key and shape are signed parts of it, so an altered credential can produce
+    any of them.
+
+    `at` outside the credential's validity period: the SDK checks dates before
+    the signature, so the signature is checked again at a time inside the
+    period (its `validFrom`, else its `validUntil`). The result is then
+    `used_outside_validity` with that signature's verdict, or the signature's
+    own failure reason. `nowReason` says when a credential valid at `at` is
+    expired (or not yet valid) now. A credential with `issuanceDate` is judged
+    at the current time whatever `at` says: `atApplied` is then False."""
     if not isinstance(credential, dict):
         return {"valid": None, "reason": "no_credential",
                 "detail": "Statement carries no `credential` object."}
 
     proof = credential.get("proof")
     if not isinstance(proof, dict):
-        return {"valid": None, "reason": "no_proof",
+        return {"valid": False, "reason": "missing_proof",
                 "detail": "Credential has no `proof` object."}
 
     ctx = _contexts_arg(contexts)
@@ -343,6 +277,7 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None)
         # (`verify_statement`) catches that move. Said plainly so no reader
         # mistakes a green signature for a bound one.
         "subjectBindingChecked": bool(statement_id),
+        "checkedAt": at,
     }
 
     vm = proof.get("verificationMethod") or credential.get("issuer") or ""
@@ -353,13 +288,33 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None)
             pass   # key type is reporting colour, not part of the verdict
 
     try:
-        ok = eqty_sdk.verify_vc(json.dumps(credential), statement_id, ctx)
+        r = _detailed(credential, statement_id, ctx, at)
+        result["atApplied"] = r["at_applied"]
+        if r["valid"]:
+            if at and r["at_applied"]:
+                now = _detailed(credential, statement_id, ctx, None)
+                if now["reason"] in ("expired", "not_yet_valid"):
+                    result["nowReason"] = now["reason"]
+                    result["found"] = credential.get("validUntil" if now["reason"] == "expired" else "validFrom")
+            return dict(result, valid=True)
+        if r["reason"] in ("expired", "not_yet_valid") and at:
+            inside = credential.get("validFrom") or credential.get("validUntil")
+            sig = _detailed(credential, statement_id, ctx, inside)
+            if sig["reason"] in ("expired", "not_yet_valid"):
+                return dict(result, valid=False, reason="empty_validity_period",
+                            detail="Its validity period (%s to %s) contains no time, so its signature "
+                                   "could not be checked." % (credential.get("validFrom"), credential.get("validUntil")))
+            if not sig["valid"]:
+                return dict(result, valid=False, reason=sig["reason"], detail=sig["detail"])
+            return dict(result, valid=False, reason="used_outside_validity", found=at,
+                        detail="Used at %s, outside its validity period (%s to %s); its signature "
+                               "verifies at %s." % (at, credential.get("validFrom") or "an unstated start",
+                                                    credential.get("validUntil") or "no end", inside))
+        return dict(result, valid=False, reason=r["reason"], detail=r["detail"])
     except ValueError as e:
         # Not a credential at all: not JSON, no credentialSubject, or more
-        # than one subject. Not a failed proof, but a FAILED check all the
-        # same: a registration whose credential does not parse is a defect in
-        # the file, not a check we lacked the means to run.
-        return dict(result, valid=False, reason="malformed_credential",
+        # than one subject. A defect in the file, so a FAILED check.
+        return dict(result, valid=False, reason="malformed",
                     detail="%s: %s" % (type(e).__name__, e))
     except RuntimeError as e:
         # The DID method would need the network. Only did:key, did:jwk and
@@ -371,26 +326,6 @@ def verify_credential(credential: dict, contexts=None, statement_id: str = None)
     except Exception as e:  # noqa: BLE001 - an unexpected SDK error is not a verdict
         return dict(result, valid=None, reason="verifier_error",
                     detail="%s: %s" % (type(e).__name__, e))
-
-    if ok:
-        return dict(result, valid=True)
-
-    detail = ("`verify_vc` returned false. The SDK folds several causes into "
-              "one boolean: the proof does not validate against the issuer's "
-              "key, the credential is bound to a different subject, or a "
-              "declared @context is neither embedded in the SDK nor supplied "
-              "by the manifest (it is never fetched). Treat as NOT verified.")
-    if statement_id and subject and subject != statement_id:
-        return dict(result, valid=False, reason="subject_mismatch",
-                    detail="Credential's credentialSubject.id is %r but it was "
-                           "checked against statement %r. A valid signature "
-                           "over another subject says nothing about this "
-                           "statement." % (subject, statement_id))
-    uncheckable = outside_validity(credential) or why_uncheckable(credential, contexts, result.get("keyType"))
-    if uncheckable:
-        reason, found, why = uncheckable
-        return dict(result, valid=None, reason=reason, found=found, detail=why)
-    return dict(result, valid=False, reason="signature_mismatch", detail=detail)
 
 
 # ------------------------------------------------- statement integrity
@@ -414,7 +349,7 @@ def verify_statement_integrity(statement: dict, contexts=None):
                 "detail": "%s: %s" % (type(e).__name__, e)}
     except RuntimeError as e:
         # A context that is neither embedded nor supplied RAISES here
-        # (unlike verify_vc, which reports False). Unchecked, not modified.
+        # (verify_vc_detailed reports it as unresolved_context). Unchecked, not modified.
         return {"valid": None, "reason": "context_unresolvable",
                 "detail": "%s: %s. The context is never fetched; this "
                           "statement is unchecked, not modified."
@@ -529,7 +464,7 @@ def verify_sigstore_bundle(statement: dict):
     return result
 
 
-def verify_manifest(data: dict, only_statement_id: str = None):
+def verify_manifest(data: dict, only_statement_id: str = None, at: str = None):
     """Signature verification for every `CredentialRegistration` statement,
     keyed by statement id. Same return shape the CLI and `report.py` have
     always consumed.
@@ -549,7 +484,7 @@ def verify_manifest(data: dict, only_statement_id: str = None):
         if not isinstance(credential, dict):
             # No W3C credential -- but that does NOT mean nothing to check.
             # These commonly carry a Sigstore DSSE bundle instead, which the
-            # SDK's verify_vc does not read. Local code still handles it.
+            # SDK's verify_vc_detailed does not read. Local code still handles it.
             sig_result = verify_sigstore_bundle(s)
             if sig_result is not None:
                 results[sid] = sig_result
@@ -561,8 +496,23 @@ def verify_manifest(data: dict, only_statement_id: str = None):
 
         # Bind the credential to the subject it names, and cross-check that
         # the named subject is a statement this manifest actually contains.
+        # Judge it at the time it was used. A statement subject's own
+        # `timestamp` is covered by the signature (it is part of the @id the
+        # credential signs); otherwise the registration's, which only its own
+        # @id covers. Never `validFrom` or the proof's `created`: the signer
+        # backdates both by an hour.
         subject = (credential.get("credentialSubject") or {}).get("id")
-        r = verify_credential(credential, contexts, statement_id=subject)
+        statements = data.get("statements") or {}
+        if at is not None:
+            when, source = at, "given"
+        elif _time((statements.get(subject) or {}).get("timestamp")):
+            when, source = statements[subject]["timestamp"], "subject"
+        elif _time(s.get("timestamp")):
+            when, source = s["timestamp"], "registration"
+        else:
+            when, source = None, None
+        r = verify_credential(credential, contexts, statement_id=subject, at=when)
+        r["checkedAtSource"] = source
         if subject and subject not in (data.get("statements") or {}):
             r["subjectPresentInManifest"] = False
             r.setdefault("notes", []).append(
@@ -581,13 +531,21 @@ def main():
     if len(sys.argv) < 2:
         print(__doc__)
         sys.exit(1)
-    path = sys.argv[1]
-    only = sys.argv[2] if len(sys.argv) > 2 else None
+    args = sys.argv[1:]
+    at = None
+    if "--at" in args:
+        i = args.index("--at")
+        at = args[i + 1] if i + 1 < len(args) else None
+        if not _time(at):
+            raise SystemExit("--at needs an RFC 3339 time, e.g. 2026-09-02T20:30:56Z")
+        del args[i:i + 2]
+    path = args[0]
+    only = args[1] if len(args) > 1 else None
 
     with open(path) as f:
         data = json.load(f)
 
-    results = verify_manifest(data, only)
+    results = verify_manifest(data, only, at)
     statements = verify_statements(data, only)
 
     def _tally(d):

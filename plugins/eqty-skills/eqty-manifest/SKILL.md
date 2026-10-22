@@ -219,12 +219,22 @@ How to read it:
   checked*, and these are collapsed into one count line (`--full` lists each).
   Older emitters wrote registrations that drift this way, and the manifest
   alone cannot tell drift from tampering.
-- **A signature the SDK cannot check reads *not checked*, never failed**, with
-  the reason and what was found — e.g. `(unsupported_proof_type:
-  RsaSignature2018)`. That is unknown, not forged (`references/verification.md`).
-  A credential past its `validUntil` reads *not checked* with the date: the SDK
-  checks dates before the signature, so say it expired, and don't say its
-  signature was valid or invalid.
+- **Each credential is judged at its time of use**: its subject statement's
+  `timestamp`, which the signature covers (else its registration's). Every
+  reason the SDK gives is a failure, shown in brackets — e.g. *Signature
+  validation failed for … (unsupported_suite)*. An altered credential can
+  produce any of them, so don't call one "unknown" or "not forged"
+  (`references/verification.md`). Only a DID method that needs the network
+  (`unresolvable_signing_key`) or an SDK error reads *not checked*.
+- **An expired credential that verified at its time of use is fine.** The note
+  under the Summary rows says so, with the date it expired; for an identity
+  credential it also says it was in force when used. That is normal for a
+  short-lived attestation. Don't judge "when" from the credential's own dates:
+  the signer backdates `validFrom` and the proof's `created` by an hour.
+  *Used outside its validity period* and *Registered outside its issuer's
+  attestation* are failures — report those.
+- **Credentials with `issuanceDate`** are judged at the current time whatever
+  their time of use; the Summary note counts them. Say so if one has expired.
 - **Signers** also reports whether each credential's `issuer` is its
   registration's `registeredBy`. A mismatch is a failure.
 - **Execution environment** checks that every `executedOn` names a system the

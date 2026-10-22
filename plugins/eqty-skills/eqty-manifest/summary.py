@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["eqty-sdk>=2.4.1", "cryptography", "base58"]
+# dependencies = ["eqty-sdk>=2.5.0", "cryptography", "base58"]
 # ///
 """summary.py — every verification check on a manifest, as one text block.
 
@@ -30,7 +30,7 @@ signed, intact metadata) is not "missing": it is listed under Hashes with its
 reason and does not by itself make the exit code 2.
 
 Composes the existing checks; it re-implements none of them:
-verify_credentials (eqty_sdk verify_vc / verify_statement), parse_manifest's
+verify_credentials (eqty_sdk verify_vc_detailed / verify_statement), parse_manifest's
 content check (eqty_sdk get_cid_for_bytes) and verify_attestation. The only
 logic of its own is the joins between them and two field comparisons.
 
@@ -90,6 +90,42 @@ def _tally(statuses):
             "unchecked": c["unchecked"], "missing": c["missing"], "total": len(statuses)}
 
 
+def _time_of_use(S, sid):
+    """For an identity credential outside its validity period now, or used
+    outside it: was it in force when its subject used it? Read from the statements' own `timestamp`s, which are part of
+    what each statement's @id commits to. The credential's dates are not used
+    for "when": integrity's signer backdates `validFrom` and the proof's
+    `created` by an hour.
+
+    Two facts, reported side by side and never merged:
+    - `chain`: was it registered while its issuer's own identity attestation in
+      this manifest was in force? None when the issuer has none, or attests itself.
+    - `use`: the statements its subject registered, and how many carry a
+      timestamp inside this credential's validity period."""
+    st = S[sid]
+    cred = st["credential"]
+    issuer, subject = _id(cred.get("issuer")), (cred.get("credentialSubject") or {}).get("id")
+    window = lambda c: (V._instant(c.get("validFrom")), V._instant(c.get("validUntil")))
+    inside = lambda t, w: t is not None and (w[0] is None or t >= w[0]) and (w[1] is None or t <= w[1])
+    registered, own = V._instant(st.get("timestamp")), window(cred)
+
+    chain = None
+    parent = next((x["credential"] for k, x in S.items() if k != sid and isinstance(x.get("credential"), dict)
+                   and "IdentityAttestation" in (x["credential"].get("type") or [])
+                   and (x["credential"].get("credentialSubject") or {}).get("id") == issuer), None)
+    if parent is not None and issuer != subject and registered is not None:
+        chain = {"in_force": inside(registered, window(parent)),
+                 "from": parent.get("validFrom"), "until": parent.get("validUntil")}
+
+    used = sorted((t, x["timestamp"]) for t, x in ((V._instant(x.get("timestamp")), x) for k, x in S.items()
+                                                    if k != sid and _id(x.get("registeredBy")) == subject)
+                  if t is not None)
+    use = {"total": len(used), "inside": sum(inside(t, own) for t, _ in used),
+           "first": used[0][1] if used else None, "last": used[-1][1] if used else None}
+    return {"registered": st.get("timestamp"), "chain": chain, "use": use,
+            "from": cred.get("validFrom"), "until": cred.get("validUntil")}
+
+
 def _credentials(data, sigs, ids):
     """One entry per CredentialRegistration: what it vouches for, who signed
     it, its signature's status, and its own statement's @id result."""
@@ -129,31 +165,76 @@ def _credentials(data, sigs, ids):
         # its true subject.
         valid, idv = r.get("valid"), ids.get(sid, {}).get("valid")
         status = {True: "verified", False: "failed", None: "unchecked"}[valid]
+        tou = (_time_of_use(S, sid) if (r.get("nowReason") or r.get("reason") == "used_outside_validity")
+               and isinstance(subject, str) and subject.startswith("did:") else None)
         out[sid] = {"kind": kind, "subject": subject, "label": label, "signer": signer,
                     "status": status, "reason": r.get("reason"), "detail": r.get("detail"), "env": env,
                     "found": r.get("found"),
                     "id_valid": idv, "sig_valid": valid,
                     "issuer": _id(cred.get("issuer")) if cred else None,
-                    "registeredBy": _id(st.get("registeredBy"))}
+                    "registeredBy": _id(st.get("registeredBy")), "time_of_use": tou,
+                    "now_reason": r.get("nowReason"), "checked_at": r.get("checkedAt"),
+                    "at_applied": r.get("atApplied")}
     return out
+
+
+def _notes(creds):
+    """Lines that are not issues: credentials that verified at their time of
+    use but are outside their validity period now, and credentials the SDK
+    could only judge at the current time."""
+    out = []
+    for c in creds.values():
+        if c["sig_valid"] and c["now_reason"]:
+            state = ("has since expired (%s)" if c["now_reason"] == "expired" else "is not valid until %s") % c["found"]
+            out.append("%s verified at its time of use (%s); it %s%s" % (
+                c["label"], c["checked_at"], state, _when_used(c.get("time_of_use"))))
+    legacy = sum(1 for c in creds.values() if c["at_applied"] is False)
+    if legacy:
+        out.append("%d credential%s use%s issuanceDate, so the SDK judged %s at the current time, "
+                   "not at %s time of use" % (legacy, "" if legacy == 1 else "s", "s" if legacy == 1 else "",
+                                              "it" if legacy == 1 else "them", "its" if legacy == 1 else "their"))
+    return out
+
+
+def _when_used(t):
+    """The time-of-use clause for an expired identity credential's note, or ''."""
+    if not t:
+        return ""
+    parts = []
+    if (t.get("chain") or {}).get("in_force"):
+        parts.append("registered %s while its issuer's attestation was in force" % t["registered"])
+    u = t.get("use") or {}
+    if u.get("total") and u["inside"] == u["total"]:
+        parts.append("all %d statements its subject registered (%s to %s) fall inside its validity period"
+                     % (u["total"], u["first"], u["last"]))
+    return "; when used: " + "; ".join(parts) if parts else ""
 
 
 def _credential_issues(c, sid):
     """The (2) lines for one credential: its signature, then its registration."""
     out = []
     reg = " (its registration %s also does not hash to its @id)" % sid if c["id_valid"] is False else ""
-    if c["sig_valid"] is False and c["reason"] == "malformed_credential":
+    if c["sig_valid"] is False and c["reason"] == "malformed":
         out.append(("failed", "Malformed credential", "Malformed credential for %s%s" % (c["label"], reg)))
+    elif c["sig_valid"] is False and c["reason"] == "used_outside_validity":
+        out.append(("failed", "Used outside its validity period", "%s: %s%s" % (c["label"], c["detail"], reg)))
     elif c["sig_valid"] is False:
-        out.append(("failed", "Signature failed", "Signature validation failed for %s%s" % (c["label"], reg)))
-    elif c["sig_valid"] is None and c["reason"] in ("expired", "not_yet_valid"):
-        out.append(("unchecked", "Signature not checked", "Signature not checked for %s: the credential %s %s, "
-                    "and the SDK checks dates before the signature" % (
-                        c["label"], "expired" if c["reason"] == "expired" else "is not valid until", c["found"])))
+        out.append(("failed", "Signature failed", "Signature validation failed for %s (%s)%s" % (
+            c["label"], c["reason"], reg)))
     elif c["sig_valid"] is None:
         why = "%s: %s" % (c["reason"], c["found"]) if c.get("found") else c["reason"]
         out.append(("unchecked", "Signature not checked", "Signature not checked for %s (%s)" % (
             c["label"], why)))
+    t = c.get("time_of_use") or {}
+    if (t.get("chain") or {}).get("in_force") is False:
+        out.append(("failed", "Registered outside its issuer's attestation",
+                    "%s was registered %s, outside its issuer's attestation (valid %s to %s)" % (
+                        c["label"], t["registered"], t["chain"]["from"], t["chain"]["until"] or "no end")))
+    if t.get("use") and t["use"]["inside"] < t["use"]["total"]:
+        out.append(("failed", "Used outside its validity period",
+                    "%d of %d statements %s's subject registered fall outside its validity period (%s to %s)" % (
+                        t["use"]["total"] - t["use"]["inside"], t["use"]["total"], c["label"],
+                        t["from"], t["until"] or "no end")))
     if c["sig_valid"] is not False and c["id_valid"] is False:
         out.append(("unchecked", "Registration does not re-hash",
                     "Registration %s does not hash to its @id, for %s" % (sid, c["label"])))
@@ -346,7 +427,7 @@ def verification_summary(data):
             issues.append(("failed", "Missing system", "%s executedOn names a system not in this manifest: %s" % (l["from"], l["did"])))
 
     issues.sort(key=lambda i: (SEVERITY[i[0]], i[1], i[2]))
-    return {"rows": rows, "issues": issues, "signers": signer_rows,
+    return {"rows": rows, "issues": issues, "notes": _notes(creds), "signers": signer_rows,
             "issuer_agreement": {"agree": issuer_ok, "total": len(w3c)},
             "content": content, "hardware": hardware, "executed_on": links,
             "exit_code": _exit_code(issues, content, hardware)}
@@ -416,6 +497,7 @@ def render_text(s, full=False):
     L = ["Summary", "======="]
     for name, t in s["rows"]:
         L.append("%d / %d %s verified%s" % (t["verified"], t["total"], name, _unchecked(t)))
+    L += _cap(s.get("notes") or [], full, "- ")
     if s["issues"]:
         L.append("")
         by_kind = defaultdict(list)          # issues arrive sorted, so kinds stay in severity order
