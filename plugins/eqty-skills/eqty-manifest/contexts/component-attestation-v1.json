@@ -1,0 +1,128 @@
+{
+  "@context": {
+    "ComponentAttestation": {
+      "@context": {
+        "@propagate": true,
+        "@protected": true,
+        "AgentCertificationEvidenceV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "statements": {
+              "@id": "https://ns.eqtylab.io/terms/statements",
+              "@type": "@id"
+            }
+          },
+          "@id": "https://ns.eqtylab.io/terms/AgentCertificationEvidenceV1"
+        },
+        "AgentCertificationV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "authorizedBy": {
+              "@id": "https://ns.eqtylab.io/terms/authorizedBy",
+              "@type": "@id"
+            },
+            "configuration": {
+              "@id": "https://ns.eqtylab.io/terms/configuration",
+              "@type": "@id"
+            },
+            "operatingProfile": {
+              "@id": "https://ns.eqtylab.io/terms/operatingProfile",
+              "@type": "@id"
+            },
+            "program": {
+              "@id": "https://ns.eqtylab.io/terms/program",
+              "@type": "@id"
+            }
+          },
+          "@id": "https://ns.eqtylab.io/terms/AgentCertificationV1"
+        },
+        "AmdSevMeasurementV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "append": {
+              "@id": "https://ns.eqtylab.io/terms/append",
+              "@type": "@id"
+            },
+            "appendSha256": "https://ns.eqtylab.io/terms/appendSha256",
+            "guest_features": "https://ns.eqtylab.io/terms/guest_features",
+            "initrd": {
+              "@id": "https://ns.eqtylab.io/terms/initrd",
+              "@type": "@id"
+            },
+            "initrdSha256": "https://ns.eqtylab.io/terms/initrdSha256",
+            "kernel": {
+              "@id": "https://ns.eqtylab.io/terms/kernel",
+              "@type": "@id"
+            },
+            "kernelSha256": "https://ns.eqtylab.io/terms/kernelSha256",
+            "ovmf": {
+              "@id": "https://ns.eqtylab.io/terms/ovmf",
+              "@type": "@id"
+            },
+            "ovmfSha256": "https://ns.eqtylab.io/terms/ovmfSha256",
+            "rootfs": {
+              "@id": "https://ns.eqtylab.io/terms/rootfs",
+              "@type": "@id"
+            },
+            "rootfsSha256": "https://ns.eqtylab.io/terms/rootfsSha256",
+            "vcpu_type": "https://ns.eqtylab.io/terms/vcpu_type",
+            "vcpus": "https://ns.eqtylab.io/terms/vcpus",
+            "vmm_type": "https://ns.eqtylab.io/terms/vmm_type"
+          },
+          "@id": "https://ns.eqtylab.io/terms/AmdSevMeasurementV1"
+        },
+        "EvaluationReportV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "producer": "https://ns.eqtylab.io/terms/producer",
+            "producerInfo": "https://ns.eqtylab.io/terms/producerInfo",
+            "report": {
+              "@id": "https://ns.eqtylab.io/terms/report",
+              "@type": "@id"
+            },
+            "result": "https://ns.eqtylab.io/terms/result",
+            "url": "https://ns.eqtylab.io/terms/url",
+            "version": "https://ns.eqtylab.io/terms/version"
+          },
+          "@id": "https://ns.eqtylab.io/terms/EvaluationReportV1"
+        },
+        "ProjectComplianceEvidenceV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "statements": {
+              "@id": "https://ns.eqtylab.io/terms/statements",
+              "@type": "@id"
+            }
+          },
+          "@id": "https://ns.eqtylab.io/terms/ProjectComplianceEvidenceV1"
+        },
+        "ProjectComplianceV1": {
+          "@context": {
+            "@propagate": true,
+            "@protected": true,
+            "authorizedBy": {
+              "@id": "https://ns.eqtylab.io/terms/authorizedBy",
+              "@type": "@id"
+            },
+            "policy": {
+              "@id": "https://ns.eqtylab.io/terms/policy",
+              "@type": "@id"
+            },
+            "project": {
+              "@id": "https://ns.eqtylab.io/terms/project",
+              "@type": "@id"
+            }
+          },
+          "@id": "https://ns.eqtylab.io/terms/ProjectComplianceV1"
+        },
+        "component": "https://ns.eqtylab.io/terms/component"
+      },
+      "@id": "https://ns.eqtylab.io/terms/ComponentAttestation"
+    }
+  }
+}

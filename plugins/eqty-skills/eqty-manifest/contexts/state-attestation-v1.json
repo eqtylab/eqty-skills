@@ -1,0 +1,15 @@
+{
+  "@context": {
+    "StateAttestation": {
+      "@context": {
+        "@propagate": true,
+        "@protected": true,
+        "state": {
+          "@id": "https://ns.eqtylab.io/terms/state",
+          "@type": "@json"
+        }
+      },
+      "@id": "https://ns.eqtylab.io/terms/StateAttestation"
+    }
+  }
+}

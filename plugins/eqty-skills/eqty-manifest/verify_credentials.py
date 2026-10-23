@@ -194,7 +194,11 @@ def context_loader(embedded=None, prefer_embedded=True, revision=0):
 # Contexts EQTY credentials name that manifests do not embed and the SDK does
 # not compile in. Pinned copies live in contexts/, with their hashes in
 # contexts/SOURCE.md.
-PINNED_CONTEXTS = {"https://ns.eqtylab.io/vc/identity-attestation/v1": "identity-attestation-v1.json"}
+PINNED_CONTEXTS = {
+    "https://ns.eqtylab.io/vc/identity-attestation/v1": "identity-attestation-v1.json",
+    "https://ns.eqtylab.io/vc/component-attestation/v1": "component-attestation-v1.json",
+    "https://ns.eqtylab.io/vc/state-attestation/v1": "state-attestation-v1.json",
+}
 
 
 @lru_cache(maxsize=None)

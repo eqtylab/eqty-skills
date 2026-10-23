@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.2 — 2026-10-23
+
+- **Component and state attestations can be verified offline.** eqty-manifest
+  now also carries pinned copies of EQTY's
+  `https://ns.eqtylab.io/vc/component-attestation/v1` and
+  `https://ns.eqtylab.io/vc/state-attestation/v1` contexts, next to
+  `identity-attestation/v1`. eqty-sdk does not include them, so a manifest that
+  did not embed them read *not checked*. Each copy is used only when it matches
+  its recorded hash; a context the manifest embeds still takes precedence.
+
 ## 0.4.1 — 2026-10-22
 
 - **Identity attestations verify again.** They name EQTY's

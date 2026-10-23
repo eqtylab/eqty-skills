@@ -107,11 +107,11 @@ documents their credentials declare.
 The original property survives the move: contexts now come from a pinned,
 versioned dependency that resolves them offline, not from a `contexts/`
 folder anyone can drop a file into. The skill ships no loose context files.
-The one exception is EQTY's own `https://ns.eqtylab.io/vc/identity-attestation/v1`,
-which identity attestations name and neither manifests nor the SDK carry:
-`contexts/identity-attestation-v1.json` is a pinned copy (the explorer's), used
-only when it matches the hash in `contexts/SOURCE.md`, and no other file there
-is read. A manifest's own `contexts` are still passed through and still take
+The exception is EQTY's own attestation contexts, which credentials name and
+neither manifests nor the SDK carry: `identity-attestation/v1`,
+`component-attestation/v1` and `state-attestation/v1` under
+`https://ns.eqtylab.io/vc/`. `contexts/` holds a pinned copy of each, used only
+when it matches the hash in `contexts/SOURCE.md`; no other file there is read. A manifest's own `contexts` are still passed through and still take
 **precedence**, which is what keeps a credential signed under an older
 revision of `credentials/v2` verifying.
 
