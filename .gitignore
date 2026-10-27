@@ -1,0 +1,5 @@
+# Python bytecode and macOS metadata: produced by running the scripts or browsing
+# this checkout, never part of the plugin.
+__pycache__/
+*.pyc
+.DS_Store
