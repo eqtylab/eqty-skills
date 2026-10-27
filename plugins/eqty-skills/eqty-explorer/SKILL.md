@@ -1,6 +1,6 @@
 ---
 name: eqty-explorer
-description: Shows an EQTY manifest's lineage graph in the browser and drives it while you answer (show only the nodes an answer is about, filter by type, signer, metadata or date, select a node; open a machine's chain of trust). Load it when the user asks to see the graph — "open it in the explorer", "show me the graph", "visualize the lineage", "highlight the steps that…", "show only…", "what is this node I clicked", "show the chain of trust". Also: whenever you answer a question about a manifest's lineage with eqty-manifest (its steps, inputs, outputs, what something was made, trained or derived from, what used it, or what ran on which machine), end with one line — "Want me to show this in the lineage explorer in your browser?" — and load this skill if they say yes; ask once per session, and not for a report file. Answers themselves always come from eqty-manifest.
+description: Shows an EQTY manifest's lineage graph in the browser and drives it while you answer (show only the nodes an answer is about, filter by type, signer, metadata or date, select a node). Load it when the user asks to see the graph — "open it in the explorer", "show me the graph", "visualize the lineage", "highlight the steps that…", "show only…", "what is this node I clicked". Also: whenever you answer a question about a manifest's lineage with eqty-manifest (its steps, inputs, outputs, what something was made, trained or derived from, what used it, or what ran on which machine), end with one line — "Want me to show this in the lineage explorer in your browser?" — and load this skill if they say yes; ask once per session, and not for a report file. Answers themselves always come from eqty-manifest.
 ---
 
 # EQTY lineage explorer
@@ -8,7 +8,7 @@ description: Shows an EQTY manifest's lineage graph in the browser and drives it
 The user is chatting with you, the coding agent, and looking at a manifest's
 lineage graph in the browser. You answer in the chat and make the graph show
 what you are talking about: cut it down to the part that matters, filter it,
-select a node, or open the chain of trust for the machine it ran on.
+or select a node.
 
 **This skill does not read or verify manifests; eqty-manifest does.** Load
 eqty-manifest and follow its contract and its trust steps: the manifest is the
@@ -27,9 +27,9 @@ directory, with `summary.py` and `parse_manifest.py`, is shown when it loads.
 **Ask before the first `serve`.** A manifest can hold sensitive data. Ask
 once per session, in these words or close to them:
 
-> The graph is drawn in your browser by EQTY's explorer and chain-of-trust
-> app, both pinned to fixed versions (the explorer's code loads from
-> jsDelivr). The manifest never leaves your machine. OK to open it?
+> The graph is drawn in your browser by EQTY's lineage explorer, pinned to a
+> fixed version (its code loads from jsDelivr). The manifest never leaves your
+> machine. OK to open it?
 
 Run `serve` only on a yes, and answer in text alone on a no. When `serve`
 needs approval to leave a sandboxed run, give the same facts as the reason,
@@ -44,13 +44,11 @@ and **opens it in the user's browser itself**. Give the user the URL, and don't
 open it again with browser or computer-use tools: a second tab is a second
 copy of the page. Open it yourself only if the user says it didn't appear. The
 page loads the published EQTY explorer (`@eqtylab/explorer` from jsDelivr,
-pinned by version and hash) and, when asked, frames the chain-of-trust app (a
-copy pinned in this skill's `trust/`, served locally). It hands each the
-manifest inside the browser.
+pinned by version and hash) and hands it the manifest inside the browser.
 
-- **Why the manifest stays local:** both apps run under a content security
-  policy that lets them connect only to where their own code comes from, and
-  the chain-of-trust app runs on its own local origin, apart from the page.
+- **Why the manifest stays local:** the page runs under a content security
+  policy that lets it connect only to the local server and to where the
+  explorer's code comes from.
   The one credential definition the explorer fetches
   (`ns.eqtylab.io/vc/identity-attestation/v1`) is answered by the page's
   service worker from a pinned copy in `contexts/`. A browser without service
@@ -88,21 +86,20 @@ For every question:
    - **`query '<fields>' --note "…"`** when the question is about a field that
      `ids` can't select: asset type, a signer or actor by name, metadata, dates,
      `has:vc`. See `references/recipes.md`.
-   - **`trust <did>`** for a machine question ("where did it run", "show the
-     hardware attestation"): first `only $(explorer.py ids --on <did>
-     --with-io)` so the steps that ran there and their inputs and outputs show,
-     then `trust <did>` to open the chain-of-trust pane on it. The answer quotes
-     that DID's *Execution environment* line from the summary block.
+   - **A machine question** ("where did it run", "show the hardware
+     attestation"): `only $(explorer.py ids --on <did> --with-io)` so the steps
+     that ran there and their inputs and outputs show, then `select` one of
+     those steps: its sidebar shows the machine it was executed on. The answer
+     quotes that DID's *Execution environment* line from the summary block.
    - **Several machines in one answer** (two DIDs with TDX evidence, say): one
      `only` with the union of their `ids --on <did> --with-io` sets, and a note
-     naming each machine. The trust pane focuses one DID at a time, so open one
-     with `trust`, say which one is open, and offer the other.
+     naming each machine.
    - **A question that names a kind of hardware** ("the TDX machine", "the
      H100", "the SEV-SNP box") means every DID whose *Execution environment*
      lines name it, not the first one found. If there are several, say so ("two
      machines have TDX evidence"), and it is the several-machines case above.
 4. **One view per answer.** The user sees only the canvas you leave, so never
-   chain `only`, `query` or `trust` calls to show things one after another:
+   chain `only` or `query` calls to show things one after another:
    each replaces the last, before anyone has seen it. Your answer describes
    the view that is on the page when you finish.
 5. **Write the answer in the chat as well,** naming each node by its name and
@@ -169,7 +166,7 @@ What you show is a claim, so eqty-manifest's never-rules apply to it:
   by the block. The block comes from integrity-py, which checks hardware
   evidence and key binding. The browser does not.
 - **What the page shows is not evidence.** You may describe what the explorer
-  or the chain-of-trust pane displays, as a description of the view. Every
+  displays, as a description of the view. Every
   claim about what verified — hardware, measurements, key binding — quotes the
   summary block's *Execution environment* line for that DID instead.
 - **A query result is a view, not evidence.** `has:vc`, `statement:credential`
@@ -182,7 +179,7 @@ What you show is a claim, so eqty-manifest's never-rules apply to it:
 
 The graph draws data and computation nodes only. Identity attestations,
 credentials, metadata and orphaned blobs are not nodes. Answer those in text.
-For a machine, use `trust <did>`. If a selector returns nothing, don't
+For a machine, show its steps and select one. If a selector returns nothing, don't
 show an empty canvas: say what you looked for and that the graph has no such node.
 
 ## Commands
@@ -200,11 +197,10 @@ show an empty canvas: say what you looked for and that the graph has no such nod
 | `select <id>` | select one node; a filtered-out one clears the query first |
 | `reset` | everything visible, no query, nothing selected, note cleared |
 | `selection` | the node the user last clicked, and their query if they typed one |
-| `trust <did>` | chain of trust for a machine (`did:key` only) |
 | `note [text]` | set or clear the banner |
 
 Ids are `urn:cid:…` node ids or bare addresses. `-` reads them from stdin.
 Every command prints the page's reply. `only`, `hide` and `show` give
 `visible`, `hidden`, `shown` (what the explorer counts) and `unknown`; `query`
-gives `shown`; `trust` gives `found`. Check `unknown`, `warning` and `found`, and
+gives `shown`. Check `unknown` and `warning`, and
 say so when an id didn't resolve.

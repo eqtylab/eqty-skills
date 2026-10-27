@@ -9,7 +9,7 @@ word for it.
 |---|---|---|
 | **`eqty-manifest`** | a manifest is in hand | parses it, verifies its signatures, content addresses, statement integrity and hardware attestation evidence, and writes a report |
 | **`eqty-instrument`** | you want your code to emit one | makes a repo emit a manifest, delivered as a patch for a human to review |
-| **`eqty-explorer`** | you want to see one | shows a manifest's lineage graph in your browser and drives it while the agent answers: shows only the nodes an answer is about, filters, selects, and opens a machine's chain of trust |
+| **`eqty-explorer`** | you want to see one | shows a manifest's lineage graph in your browser and drives it while the agent answers: shows only the nodes an answer is about, filters, and selects |
 
 `eqty-instrument` produces a manifest and points at it; `eqty-manifest` reads it
 back; `eqty-explorer` draws it. Answers always come from `eqty-manifest`, and the

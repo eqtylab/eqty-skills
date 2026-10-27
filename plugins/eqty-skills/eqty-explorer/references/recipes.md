@@ -10,8 +10,8 @@ from `E nodes`: its lines are `id  type  name`.
 | What used this dataset? What came out of it? | `E ids --downstream <id>` | `only` |
 | Everything connected to this step | `E ids --lineage <id>` | `only` |
 | How did A lead to B? | `E ids --between <A> <B>` | `only`; if empty, say there is no path |
-| Which steps ran on this machine? | `E ids --on <did> --with-io` | `only`, then `trust <did>` |
-| Which steps ran on these machines? (several DIDs) | `E ids --on <did1> --with-io` plus the same for each DID | one `only` with all the ids; `trust` on one, offer the rest |
+| Which steps ran on this machine? | `E ids --on <did> --with-io` | `only`, then `select` one of its steps |
+| Which steps ran on these machines? (several DIDs) | `E ids --on <did1> --with-io` plus the same for each DID | one `only` with all the ids |
 | What did this signer register? | `E ids --signer <did>` | `only` |
 | Show me the computations | `E ids --computations --with-io` | `only` |
 | What's missing? | `E ids --missing` | `only --note "bytes not in the manifest"` |
@@ -60,12 +60,12 @@ this order:
    DID with a TDX line; there may be more than one.
 3. **Show its steps:** `E only $(E ids --on <did> --with-io) --note
    "<what the block says, e.g. report signature verified · key binding verified>"`.
-4. **Open its chain of trust:** `E trust <did>`. If the reply says
-   `"found": false`, the chain-of-trust app has no node for that DID. Say so.
+4. **Select one of those steps** (`E select <id>`): its sidebar shows the
+   machine it was executed on, with the explorer's own badges. Those badges are
+   a view; the answer quotes the block.
 
 **Several machines with the same verdict:** one `only` with all their steps,
-and a note naming each machine with its verdict. Open `trust` on one of them,
-say which, and offer the others.
+and a note naming each machine with its verdict.
 
 **If some machines verified and others didn't,** show one group per answer:
 the group the user asked about, with the verdict in the note, then offer the

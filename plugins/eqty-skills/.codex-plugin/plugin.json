@@ -1,6 +1,6 @@
 {
   "name": "eqty-skills",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "eqty-manifest reads, verifies and reports on EQTY lineage manifests; eqty-instrument makes a repo emit one; eqty-explorer shows one's lineage in the browser.",
   "author": {
     "name": "EQTY Lab"

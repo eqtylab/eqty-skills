@@ -17,14 +17,6 @@ It includes third-party material, each under its own license, kept beside it:
   MIT License.
   License: examples/mode2/pygit/LICENSE.txt
 
-- plugins/eqty-skills/eqty-explorer/trust/
-  The chain-of-trust app, a pinned build of EQTY Lab's VComp chain-of-trust
-  viewer, Copyright 2026 EQTY Lab, Apache License 2.0. Its bundle includes React
-  (MIT, Copyright Meta Platforms, Inc. and affiliates), React Flow / @xyflow
-  (MIT, Copyright webkid GmbH), Radix UI (MIT, Copyright WorkOS), zustand (MIT,
-  Copyright Paul Henschel) and lucide-react (ISC, Copyright Lucide Contributors).
-  Source and hashes: plugins/eqty-skills/eqty-explorer/trust/SOURCE.md
-
 - plugins/eqty-skills/eqty-explorer/contexts/identity-attestation-v1.json
   A copy of the JSON-LD context published at
   https://ns.eqtylab.io/vc/identity-attestation/v1, Copyright 2026 EQTY Lab.

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EQTY lineage explorer</title>
 <style>
-  :root { --bg: #111114; --panel: #1b1b20; --text: #e8e8ec; --muted: #9a9aa6; --accent: #8b5cf6; --bad: #f87171; }
+  :root { --bg: #111114; --panel: #1b1b20; --text: #e8e8ec; --muted: #9a9aa6; --bad: #f87171; }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.4 system-ui, sans-serif; }
   body { display: flex; flex-direction: column; }
@@ -16,41 +16,20 @@
   #status { color: var(--muted); white-space: nowrap; }
   #status.bad { color: var(--bad); white-space: normal; max-width: 60%; }
   main { flex: 1; display: flex; min-height: 0; }
-  iframe { border: 0; height: 100%; }
   #explorer { display: block; flex: 1; min-width: 0; height: 100%; }
-  #trust-pane { display: none; flex-direction: column; width: 45%; }
-  /* The handle between the panes. Shown with the pane; drag it, or focus it and use the arrow keys. */
-  #divider { display: none; flex: none; width: 6px; cursor: col-resize; background: #2a2a31; touch-action: none; }
-  main:has(#trust-pane.open) #divider { display: block; }
-  #divider:hover, #divider:focus-visible, body.resizing #divider { background: var(--accent); outline: none; }
-  /* While dragging, the frames must not take the pointer, or the drag stops at their edge. */
-  body.resizing iframe { pointer-events: none; }
-  body.resizing { cursor: col-resize; user-select: none; }
-  #trust-pane.open { display: flex; }
-  #trust-pane div { display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: var(--panel); }
-  #trust-pane button { background: none; border: 1px solid #3a3a44; color: var(--text); border-radius: 4px; cursor: pointer; }
-  #trust { flex: 1; width: 100%; }
 </style>
 </head>
 <body>
 <header><b>EQTY lineage</b><span id="note"></span><span id="status">connecting…</span></header>
 <main>
   <eqty-explorer id="explorer" theme="dark" show-upload="false"></eqty-explorer>
-  <div id="divider" role="separator" aria-orientation="vertical" aria-controls="trust-pane"
-       aria-label="Resize the chain of trust pane (double-click to reset)" tabindex="0"></div>
-  <section id="trust-pane">
-    <div><span>Chain of trust</span><button id="close-trust" type="button">Close</button></div>
-    <iframe id="trust" title="Chain of trust" sandbox="allow-scripts allow-same-origin"></iframe>
-  </section>
 </main>
 <script nonce="__NONCE__">
 "use strict";
-// Filled in by explorer.py: {trust, token, explorerSrc, explorerSri, explorerBase}.
+// Filled in by explorer.py: {token, explorerSrc, explorerSri, explorerBase}.
 const CONFIG = __CONFIG__;
-const TRUST = new URL(CONFIG.trust).origin;
 const $ = (id) => document.getElementById(id);
 const explorer = $("explorer");
-const trust = $("trust");
 const headers = { "Content-Type": "application/json", "X-Eqty-Token": CONFIG.token };
 
 let manifest = null;
@@ -109,96 +88,6 @@ async function toExplorer(command) {
   report({ type: "explorer/applied", query: applied, ...(await shownCount(applied)), requestId: command.requestId });
 }
 
-// ---- chain of trust: frame it on first use, hand it the manifest, then focus a DID
-window.addEventListener("message", (event) => {
-  if (event.origin !== TRUST || event.source !== trust.contentWindow) return;
-  if (event.data && typeof event.data === "object") trustReplies.forEach((resolve) => resolve(event.data));
-});
-const trustReplies = new Set();
-const nextTrust = (type, timeoutMs = 20000) =>
-  new Promise((resolve, reject) => {
-    const done = (data) => { if (data.type === type) { trustReplies.delete(done); resolve(data); } };
-    trustReplies.add(done);
-    setTimeout(() => { trustReplies.delete(done); reject(new Error(`no ${type} from the chain-of-trust app`)); }, timeoutMs);
-  });
-let trustReady = null; // resolves once the app has the manifest
-let trustQueue = Promise.resolve();
-
-function openTrust() {
-  $("trust-pane").classList.add("open");
-  if (!trustReady) {
-    const ready = nextTrust("vcomp/ready");
-    trust.src = CONFIG.trust;
-    trustReady = ready.then(() => {
-      const loaded = nextTrust("vcomp/loaded");
-      trust.contentWindow.postMessage({ type: "vcomp/load-manifest", manifest, source: "eqty-explorer" }, TRUST);
-      return loaded;
-    });
-    trustReady.catch(() => { trustReady = null; });
-  }
-  return trustReady;
-}
-
-function toTrust(command) {
-  trustQueue = trustQueue.then(async () => {
-    try {
-      await openTrust();
-      // The app says loaded before its graph is built, so a DID can read as not found at
-      // first. Ask again until it is found or the graph has had 20 seconds.
-      let reply;
-      for (let attempt = 0; attempt < 20; attempt++) {
-        const focused = nextTrust("vcomp/focused");
-        trust.contentWindow.postMessage({ type: "vcomp/focus-did", did: command.message.did }, TRUST);
-        reply = await focused;
-        if (reply.found) break;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-      report({ type: "vcomp/focused", did: reply.did, found: reply.found, requestId: command.requestId });
-    } catch (error) {
-      report({ type: "error", message: error.message, requestId: command.requestId });
-    }
-  });
-}
-$("close-trust").addEventListener("click", () => $("trust-pane").classList.remove("open"));
-
-// ---- the divider between the explorer and the chain of trust
-const pane = $("trust-pane");
-const divider = $("divider");
-const MIN_PANE = 240; // px left for either side
-function setPaneWidth(px) {
-  const width = Math.min(Math.max(px, MIN_PANE), window.innerWidth - MIN_PANE);
-  pane.style.width = `${width}px`;
-  divider.setAttribute("aria-valuenow", String(Math.round((100 * width) / window.innerWidth)));
-}
-let dragStartX = null;
-divider.addEventListener("pointerdown", (event) => {
-  dragStartX = event.clientX;
-  divider.setPointerCapture(event.pointerId);
-  document.body.classList.add("resizing");
-});
-divider.addEventListener("pointermove", (event) => {
-  if (divider.hasPointerCapture(event.pointerId)) setPaneWidth(window.innerWidth - event.clientX);
-});
-// Every way a drag can end, so the frames never stay unclickable: capture lost, a release
-// anywhere, or the window losing focus mid-drag.
-const endResize = () => document.body.classList.remove("resizing");
-// The release point counts too, for a pointer that jumps with no moves in between. A click
-// without movement (or the double-click reset) leaves the width alone.
-divider.addEventListener("pointerup", (event) => {
-  if (dragStartX !== null && Math.abs(event.clientX - dragStartX) > 2) setPaneWidth(window.innerWidth - event.clientX);
-  dragStartX = null;
-});
-divider.addEventListener("lostpointercapture", endResize);
-window.addEventListener("pointerup", endResize);
-window.addEventListener("blur", endResize);
-divider.addEventListener("dblclick", () => { pane.style.width = ""; });
-divider.addEventListener("keydown", (event) => {
-  const step = { ArrowLeft: 40, ArrowRight: -40 }[event.key];
-  if (!step) return;
-  event.preventDefault();
-  setPaneWidth(pane.getBoundingClientRect().width + step);
-});
-
 // ---- page: the note banner (text only, never HTML)
 function toPage(command) {
   $("note").textContent = String(command.message.text || "");
@@ -210,7 +99,7 @@ function listen() {
   const events = new EventSource(`/events?t=${encodeURIComponent(CONFIG.token)}`);
   events.onmessage = (event) => {
     const command = JSON.parse(event.data);
-    ({ explorer: toExplorer, trust: toTrust, page: toPage })[command.target]?.(command);
+    ({ explorer: toExplorer, page: toPage })[command.target]?.(command);
   };
   // The browser retries a dropped stream by itself (a laptop waking, a brief network blip), so
   // an error is only "reconnecting" at first. It is the end of the session once the server

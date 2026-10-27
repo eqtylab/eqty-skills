@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.0 — 2026-10-27
+
+- **eqty-explorer no longer includes the chain-of-trust view.** The `trust`
+  command, the side pane and the pinned build of the chain-of-trust app
+  (`eqty-explorer/trust/`) are removed, along with its NOTICE entry. For a
+  question about where a step ran, the agent now shows that machine's steps and
+  selects one, whose sidebar names the machine it was executed on; answers
+  still quote eqty-manifest's summary block. The page now frames nothing, and its
+  content security policy says so (`frame-src 'none'`).
+
 ## 0.4.2 — 2026-10-23
 
 - **Component and state attestations can be verified offline.** eqty-manifest

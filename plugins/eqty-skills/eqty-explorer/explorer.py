@@ -16,7 +16,6 @@
     python3 explorer.py select <id>                          select one node, open its sidebar
     python3 explorer.py reset                                everything visible, nothing selected
     python3 explorer.py selection                            the node the user last clicked, and their query
-    python3 explorer.py trust <did>                          chain of trust for that machine
     python3 explorer.py note [TEXT]                          banner text (none: clear it)
     python3 explorer.py status | stop
 
@@ -44,12 +43,9 @@ for them rather than an error.
 
 How it works: `serve` starts a server on 127.0.0.1 with a random port and
 token. The page it serves loads the published explorer (`<eqty-explorer>`, from
-jsdelivr, pinned by version and hash) and hands it the manifest in the page. On
-the first `trust` it frames the chain-of-trust app, a copy pinned in `trust/`
-and served on localhost:<port> (its own origin, so it can't reach the page or
-the token), and hands it the manifest by postMessage. Both run under a CSP that
-lets them connect only to where their own code comes from, so the manifest
-never leaves the machine. The other commands write a file to the server's
+jsdelivr, pinned by version and hash) and hands it the manifest in the page. The
+page runs under a CSP that lets it connect only to this server and to where the
+explorer's code comes from, so the manifest never leaves the machine. The other commands write a file to the server's
 inbox (in the temp directory); the server pushes each to the page over
 Server-Sent Events and writes the page's reply to its outbox. Files rather than HTTP, because a sandbox such as Codex's
 blocks connecting to 127.0.0.1 but allows writing there: only `serve`, which
@@ -88,10 +84,6 @@ EXPLORER_SRI = "sha384-wePxnL/hqJZdlNQPrjNNXr13ODwp5VDoV/nyGh+FHqD022h/oVfUXlvmZ
 # JSON-LD contexts the explorer fetches, pinned (contexts/SOURCE.md). sw.js answers these URLs
 # from the copies; the page's CSP allows exactly these URLs and nothing else on their host.
 PINNED_CONTEXTS = {"https://ns.eqtylab.io/vc/identity-attestation/v1": HERE / "contexts" / "identity-attestation-v1.json"}
-# The chain-of-trust app, pinned: see trust/SOURCE.md.
-TRUST_DIR = HERE / "trust"
-TRUST_TYPES = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".css": "text/css",
-               ".wasm": "application/wasm"}
 # ponytail: one session per user at a time; a second `serve` replaces the first.
 # Commands travel as files, not HTTP: a sandbox (Codex) that forbids connecting to
 # 127.0.0.1 still lets a command write here, so only `serve` needs approval.
@@ -101,9 +93,8 @@ DIR = Path(tempfile.gettempdir()) / f"eqty-explorer-{os.getuid()}"
 STATE = DIR / "state.json"
 
 ID_RE = re.compile(r"^(urn:cid:)?[a-z0-9]{8,}(/(urn:cid:)?[a-z0-9]{8,})*$")
-DID_RE = re.compile(r"^did:key:z[1-9A-HJ-NP-Za-km-z]{20,}$")
 NOTE_MAX = 300
-TIMEOUT = {"trust": 45}  # the chain-of-trust app builds its graph after it says loaded
+TIMEOUT = 10  # seconds the page has to answer a command
 # The explorer's query fields and aliases (its query/fields.ts), lower-cased, plus `metadata.<key>`.
 QUERY_FIELDS = {"name", "assettype", "type", "id", "cid", "is", "registeredby", "by", "operatedby",
                 "executedon", "statement", "has", "associationtype", "assoc", "association",
@@ -292,7 +283,7 @@ def watch_inbox(hub):
         if command.get("kind") == "stop":
             write_json(outbox / name, {"type": "stopped"})
             os._exit(0)
-        write_json(outbox / name, hub.send(command, TIMEOUT.get(command.get("kind"), 10)))
+        write_json(outbox / name, hub.send(command, TIMEOUT))
 
     while True:
         for path in sorted(inbox.glob("*.json")):
@@ -312,8 +303,7 @@ def make_handler(hub, token, manifest_bytes, page, csp, worker=b""):
 
         def _allowed(self):
             port = self.server.server_address[1]
-            # A DNS-rebinding page arrives with its own Host; only ours is served. The page and
-            # its API live on 127.0.0.1; localhost is the chain-of-trust app's origin.
+            # A DNS-rebinding page arrives with its own Host; only ours is served.
             if self.headers.get("Host") != f"127.0.0.1:{port}":
                 return False
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
@@ -337,21 +327,7 @@ def make_handler(hub, token, manifest_bytes, page, csp, worker=b""):
             length = int(self.headers.get("Content-Length") or 0)
             return json.loads(self.rfile.read(length) or b"{}")
 
-        def _trust(self):
-            """The pinned chain-of-trust app: public code, so no token, but nothing else either."""
-            port = self.server.server_address[1]
-            name = urllib.parse.urlsplit(self.path).path.lstrip("/") or "index.html"
-            if not re.fullmatch(r"index\.html|assets/[\w.-]+", name) or not (TRUST_DIR / name).is_file():
-                return self._send(404, {"error": "not found"})
-            csp = (f"default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; "
-                   f"style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; "
-                   f"connect-src 'self'; frame-ancestors http://127.0.0.1:{port}; base-uri 'none'; form-action 'none'")
-            self._send(200, (TRUST_DIR / name).read_bytes(), TRUST_TYPES.get(Path(name).suffix, "application/octet-stream"),
-                       {"Content-Security-Policy": csp})
-
         def do_GET(self):
-            if self.headers.get("Host") == f"localhost:{self.server.server_address[1]}":
-                return self._trust()
             path = urllib.parse.urlsplit(self.path).path
             # The service worker: public code and pinned public documents, so no token; it
             # can only be registered from this origin's own page.
@@ -407,8 +383,7 @@ def run_server(manifest_path):
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), http.server.BaseHTTPRequestHandler)
     server.daemon_threads = True
     port = server.server_address[1]
-    trust_origin = f"http://localhost:{port}"
-    config = {"trust": trust_origin + "/", "token": token, "explorerSrc": EXPLORER_JS,
+    config = {"token": token, "explorerSrc": EXPLORER_JS,
               "explorerSri": EXPLORER_SRI, "explorerBase": EXPLORER_BASE}
     # `</` can't close the script it sits in. The nonce lets only that script run inline: a
     # `javascript:` link or an inline handler from manifest content would not.
@@ -418,11 +393,11 @@ def run_server(manifest_path):
     contexts = {url: json.loads(path.read_text()) for url, path in PINNED_CONTEXTS.items()}
     worker = (HERE / "sw.js").read_text().replace("__CONTEXTS__", json.dumps(contexts)).encode()
     # Scripts only from the pinned explorer directory (its chunks and wasm load from there too);
-    # the page frames only the chain-of-trust app and talks only to this server, that directory
-    # and the pinned context URLs, which the service worker answers locally.
+    # the page frames nothing and talks only to this server, that directory and the pinned
+    # context URLs, which the service worker answers locally.
     csp = (f"default-src 'none'; script-src 'nonce-{nonce}' 'wasm-unsafe-eval' {EXPLORER_BASE}; "
            f"style-src 'unsafe-inline'; img-src data: blob:; worker-src 'self'; "
-           f"connect-src 'self' {EXPLORER_BASE} {' '.join(PINNED_CONTEXTS)}; frame-src {trust_origin}; "
+           f"connect-src 'self' {EXPLORER_BASE} {' '.join(PINNED_CONTEXTS)}; frame-src 'none'; "
            f"frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
     server.RequestHandlerClass = make_handler(hub, token, manifest_bytes, page, csp, worker)
     for box in ("inbox", "outbox"):
@@ -482,7 +457,7 @@ def command(kind, target, message, need_server=True):
     name = f"{secrets.token_hex(8)}.json"
     write_json(DIR / "inbox" / name, {"kind": kind, "target": target, "message": message})
     reply_path = DIR / "outbox" / name
-    deadline = time.time() + TIMEOUT.get(kind, 10) + 5
+    deadline = time.time() + TIMEOUT + 5
     while time.time() < deadline:
         if reply_path.exists():
             reply = json.loads(reply_path.read_text())
@@ -701,12 +676,6 @@ def cmd_selection(_):
                       "metadata": m.metadata_for(selected), **users_query}, indent=2, default=str))
 
 
-def cmd_trust(args):
-    if not DID_RE.match(args.did):
-        sys.exit(f"not a did:key: {args.did}")
-    print_reply(command("trust", "trust", {"type": "vcomp/focus-did", "did": args.did}))
-
-
 def cmd_note(args):
     print_reply(command("note", "page", {"type": "page/note", "text": " ".join(args.text)[:NOTE_MAX]}))
 
@@ -750,7 +719,6 @@ def main(argv=None):
     sub.add_parser("select").add_argument("id")
     sub.add_parser("reset")
     sub.add_parser("selection")
-    sub.add_parser("trust").add_argument("did")
     sub.add_parser("note").add_argument("text", nargs="*")
     args = ap.parse_args(argv)
     globals()["cmd_" + args.cmd](args)
